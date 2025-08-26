@@ -1,0 +1,108 @@
+{
+  "system": {
+    "name": "Pure Candlestick Trading System",
+    "version": "1.0.0",
+    "mode": "production",
+    "debug_level": "INFO"
+  },
+  
+  "trading": {
+    "symbol": "XAUUSD.v",
+    "timeframe": "M5",
+    "market_orders_only": true,
+    "signal_cooldown_seconds": 60,
+    "max_signals_per_hour": 20,
+    "max_positions": 30,
+    "auto_trading": true
+  },
+  
+  "candlestick_rules": {
+    "buy_conditions": {
+      "candle_color": "green",
+      "price_direction": "higher_close",
+      "min_body_ratio": 0.1,
+      "volume_confirmation": false,
+      "volume_factor_threshold": 1.2
+    },
+    "sell_conditions": {
+      "candle_color": "red", 
+      "price_direction": "lower_close",
+      "min_body_ratio": 0.1,
+      "volume_confirmation": false,
+      "volume_factor_threshold": 1.2
+    },
+    "signal_strength": {
+      "body_ratio_weight": 0.4,
+      "price_direction_weight": 0.3,
+      "volume_factor_weight": 0.3,
+      "min_signal_strength": 0.6
+    }
+  },
+  
+  "lot_sizing": {
+    "method": "dynamic",
+    "base_lot": 0.01,
+    "min_lot": 0.01,
+    "max_lot": 1.0,
+    "risk_percentage": 2.0,
+    "signal_strength_multiplier": 2.0,
+    "account_factor": {
+      "balance_threshold_1": 1000,
+      "balance_threshold_2": 5000,
+      "balance_threshold_3": 10000,
+      "lot_multiplier_1": 1.0,
+      "lot_multiplier_2": 1.5,
+      "lot_multiplier_3": 2.0
+    }
+  },
+  
+  "position_management": {
+    "max_losing_age_hours": 24,
+    "min_profit_to_close": 5.0,
+    "portfolio_balance_threshold": 0.7,
+    "max_total_loss": -500.0,
+    "max_single_loss": -100.0,
+    "margin_level_warning": 200.0,
+    "smart_close_enabled": true,
+    "recovery_close_enabled": true,
+    "emergency_close_enabled": true
+  },
+  
+  "risk_management": {
+    "max_positions": 30,
+    "max_buy_positions": 20,
+    "max_sell_positions": 20,
+    "risk_per_trade_percent": 2.0,
+    "max_risk_per_trade": 100.0,
+    "max_daily_trades": 50,
+    "max_daily_loss": -200.0,
+    "max_daily_volume": 10.0,
+    "min_margin_level": 200.0,
+    "stop_trading_margin_level": 150.0,
+    "max_drawdown_percent": 10.0,
+    "emergency_close_loss": -500.0,
+    "max_consecutive_losses": 5
+  },
+  
+  "api_backend": {
+    "enabled": false,
+    "base_url": "http://123.253.62.50:8080/api",
+    "timeout": 10,
+    "bot_name": "PureCandlestick",
+    "bot_version": "1.0.0"
+  },
+  
+  "performance_tracking": {
+    "profit_threshold": 1.0,
+    "loss_threshold": -1.0,
+    "export_enabled": true,
+    "max_history_records": 1000
+  },
+  
+  "gui_settings": {
+    "update_interval_seconds": 3,
+    "cache_duration_seconds": 5,
+    "max_log_lines": 100,
+    "theme": "dark",
+    "window_size": "1200x800"
+  }

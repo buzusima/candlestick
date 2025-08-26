@@ -1,6 +1,12 @@
 """
-🎮 Pure Candlestick Trading System - Main GUI
+🎮 Pure Candlestick Trading System - Main GUI (FIXED)
 main.py
+
+🔧 FIXED ISSUES:
+✅ log_text attribute error
+✅ OHLC data 'get' method error
+✅ numpy.void object handling
+✅ Complete GUI initialization
 
 🚀 Features:
 ✅ MT5 Terminal Scanner (คงเดิม)
@@ -9,8 +15,6 @@ main.py
 ✅ Real-time Signal Monitoring
 ✅ Position Management Interface
 ✅ Performance Tracking
-
-🎯 ไฟล์ใหม่ทั้งหมด แต่เก็บ MT5 finder logic
 """
 
 import tkinter as tk
@@ -33,7 +37,7 @@ from risk_manager import RiskManager
 
 class PureCandlestickGUI:
     """
-    🎮 Pure Candlestick Trading System - Main Interface
+    🎮 Pure Candlestick Trading System - Main Interface (FIXED)
     
     🔧 Features:
     - MT5 Terminal Scanner & Account Selection (คงเดิม)
@@ -64,8 +68,10 @@ class PureCandlestickGUI:
         self.performance_tracker = None
         self.risk_manager = None
         
-        # Initialize GUI
+        # 🔧 FIXED: Initialize GUI FIRST
         self.setup_gui()
+        
+        # เริ่ม GUI updates หลังจาก setup เสร็จ
         self.start_gui_updates()
         
         # Log system start
@@ -80,20 +86,24 @@ class PureCandlestickGUI:
         try:
             with open('config.json', 'r', encoding='utf-8') as f:
                 config = json.load(f)
-                self.log("✅ Configuration loaded successfully")
+                print("✅ Configuration loaded successfully")  # ใช้ print ก่อน log_text ready
                 return config
         except Exception as e:
-            self.log(f"❌ Error loading config: {e}")
+            print(f"❌ Error loading config: {e}")  # ใช้ print ก่อน log_text ready
             # Return default config
             return {
                 "trading": {"symbol": "XAUUSD.v", "timeframe": "M5"},
-                "candlestick_rules": {},
+                "candlestick_rules": {
+                    "buy_conditions": {"min_body_ratio": 0.1},
+                    "sell_conditions": {"min_body_ratio": 0.1},
+                    "signal_strength": {"min_signal_strength": 0.6}
+                },
                 "lot_sizing": {"base_lot": 0.01},
                 "risk_management": {"max_positions": 30}
             }
     
     def setup_gui(self):
-        """สร้าง GUI Layout - Pure Candlestick Style"""
+        """สร้าง GUI Layout - Pure Candlestick Style (FIXED)"""
         
         # ==========================================
         # 🎯 HEADER SECTION 
@@ -293,7 +303,7 @@ class PureCandlestickGUI:
         self.performance_info.pack(fill="x", padx=5, pady=3)
         
         # ==========================================
-        # 📝 LOG PANEL
+        # 📝 LOG PANEL (FIXED)
         # ==========================================
         log_frame = tk.LabelFrame(
             self.root, text="📝 System Log", 
@@ -301,6 +311,7 @@ class PureCandlestickGUI:
         )
         log_frame.pack(fill="x", padx=5, pady=2)
         
+        # 🔧 FIXED: สร้าง log_text attribute
         self.log_text = scrolledtext.ScrolledText(
             log_frame, height=8, font=("Consolas", 9),
             bg="#1a1a1a", fg="#cccccc", wrap="word"
@@ -516,12 +527,20 @@ class PureCandlestickGUI:
                                 # Update signal display
                                 self.update_signal_display(signal_data)
                                 
+                                # บันทึก signal ใน performance tracker
+                                if self.performance_tracker:
+                                    self.performance_tracker.record_signal(signal_data)
+                                
                                 # 3. ส่งออเดอร์ (ถ้ามี signal)
                                 if self.order_executor:
                                     execution_result = self.order_executor.execute_signal(signal_data)
                                     
                                     if execution_result:
-                                        self.log(f"✅ Order executed: {execution_result}")
+                                        self.log(f"✅ Order executed: {signal_data.get('action')} - {execution_result.get('success', False)}")
+                                        
+                                        # บันทึก execution ใน performance tracker
+                                        if self.performance_tracker:
+                                            self.performance_tracker.record_execution(execution_result, signal_data)
                 
                 # 4. ติดตาม positions
                 if self.position_monitor:
@@ -532,8 +551,9 @@ class PureCandlestickGUI:
                     close_actions = self.position_monitor.check_smart_close_opportunities()
                     if close_actions:
                         self.log(f"🎯 Smart close opportunities: {len(close_actions)}")
-                        for action in close_actions:
-                            self.position_monitor.execute_close_action(action)
+                        for action in close_actions[:2]:  # ทำแค่ 2 actions ต่อ cycle
+                            if self.position_monitor.execute_close_action(action):
+                                self.log(f"✅ Smart close executed: {action.get('action_type')}")
                 
                 # 5. อัพเดท performance
                 if self.performance_tracker:
@@ -568,7 +588,7 @@ class PureCandlestickGUI:
             self.candlestick_info.insert(tk.END, message)
             self.candlestick_info.see(tk.END)
         except Exception as e:
-            self.log(f"❌ Candlestick display error: {e}")
+            print(f"❌ Candlestick display error: {e}")
     
     def update_candlestick_display_from_data(self, data: Dict):
         """อัพเดท Candlestick Display จากข้อมูลจริง"""
@@ -645,13 +665,13 @@ class PureCandlestickGUI:
                     f"{pos.get('volume', 0):.2f}",
                     f"${pos.get('price_open', 0):.2f}",
                     f"${pos.get('price_current', 0):.2f}",
-                    f"${pos.get('profit', 0):.2f}",
+                    f"${pos.get('total_pnl', 0):.2f}",
                     pos.get('age', '')
                 ]
                 
                 # สีตาม profit/loss
                 tags = ()
-                profit = pos.get('profit', 0)
+                profit = pos.get('total_pnl', 0)
                 if profit > 0:
                     tags = ('profit',)
                 elif profit < 0:
@@ -685,24 +705,22 @@ class PureCandlestickGUI:
 
 🎯 Signal Statistics:
    Total Signals: {data.get('total_signals', 0)}
-   BUY Signals: {data.get('buy_signals', 0)}
-   SELL Signals: {data.get('sell_signals', 0)}
-   Success Rate: {data.get('success_rate', 0)*100:.1f}%
+   Total Orders: {data.get('total_orders', 0)}
+   Win Rate: {data.get('win_rate', 0)*100:.1f}%
    
 💰 Trading Results:
    Total Profit: ${data.get('total_profit', 0):.2f}
-   Active Positions: {data.get('active_positions', 0)}
-   Daily Trades: {data.get('daily_trades', 0)}
+   Winning Trades: {data.get('winning_trades', 0)}
+   Losing Trades: {data.get('losing_trades', 0)}
    
 🕯️ Candlestick Performance:
-   Pattern Accuracy: {data.get('pattern_accuracy', 0)*100:.1f}%
-   Volume Confirmations: {data.get('volume_confirms', 0)}
-   Strong Signals: {data.get('strong_signals', 0)}
+   Best Pattern: {data.get('best_pattern', 'N/A')}
+   Execution Rate: {data.get('execution_rate', 0)*100:.1f}%
+   Signal Accuracy: {data.get('signal_accuracy', 0)*100:.1f}%
    
 ⚡ Execution Metrics:
-   Avg Execution Time: {data.get('avg_execution_ms', 0):.0f}ms
-   Failed Orders: {data.get('failed_orders', 0)}
-   Slippage: {data.get('avg_slippage', 0):.1f} pips
+   Avg Execution Time: {data.get('avg_execution_time_ms', 0):.0f}ms
+   Signals/Hour: {data.get('signals_per_hour', 0):.1f}
 """
             
             self.update_performance_display(display_text)
@@ -728,7 +746,7 @@ class PureCandlestickGUI:
             self.log(f"❌ Closing position #{position_id}...")
             
             if self.position_monitor:
-                success = self.position_monitor.close_position_by_id(position_id)
+                success = self.position_monitor.close_position_by_id(int(position_id), "Manual Close")
                 if success:
                     self.log(f"✅ Position #{position_id} closed successfully")
                 else:
@@ -762,28 +780,32 @@ class PureCandlestickGUI:
             self.log(f"❌ Emergency close error: {e}")
     
     # ==========================================
-    # 📝 UTILITY METHODS
+    # 📝 UTILITY METHODS (FIXED)
     # ==========================================
     
     def log(self, message: str):
-        """เขียน log ลงหน้าจอ"""
+        """🔧 FIXED: เขียน log ลงหน้าจอ"""
         try:
             timestamp = datetime.now().strftime("%H:%M:%S")
             log_message = f"[{timestamp}] {message}\n"
             
-            # Add to GUI
-            self.log_text.insert(tk.END, log_message)
-            self.log_text.see(tk.END)
+            # 🔧 FIXED: ตรวจสอบว่า log_text พร้อมใช้งานหรือไม่
+            if hasattr(self, 'log_text') and self.log_text:
+                # Add to GUI
+                self.log_text.insert(tk.END, log_message)
+                self.log_text.see(tk.END)
+                
+                # Keep only last 100 lines
+                lines = self.log_text.get(1.0, tk.END).split('\n')
+                if len(lines) > 100:
+                    self.log_text.delete(1.0, f"{len(lines)-100}.0")
             
-            # Keep only last 100 lines
-            lines = self.log_text.get(1.0, tk.END).split('\n')
-            if len(lines) > 100:
-                self.log_text.delete(1.0, f"{len(lines)-100}.0")
-            
-            # Print to console
+            # Print to console (always work)
             print(log_message.strip())
             
         except Exception as e:
+            # Fallback to console
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] {message}")
             print(f"Log error: {e}")
     
     def start_gui_updates(self):
@@ -791,10 +813,7 @@ class PureCandlestickGUI:
         def update_loop():
             while True:
                 try:
-                    if self.is_trading and self.candlestick_analyzer:
-                        # อัพเดทข้อมูลทุก 5 วินาที
-                        pass  # Logic จะอยู่ใน trading_loop
-                        
+                    # Update GUI ทุก 1 วินาที
                     time.sleep(1)
                 except Exception as e:
                     self.log(f"❌ GUI update error: {e}")

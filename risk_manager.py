@@ -14,6 +14,7 @@ risk_manager.py
 ตรวจสอบและบังคับใช้กฎความเสี่ยงทั้งหมด
 """
 
+import MetaTrader5 as mt5
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 import statistics

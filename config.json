@@ -32,8 +32,9 @@
       "volume_factor_threshold": 1.2
     },
     "signal_strength": {
-      "body_ratio_weight": 0.4,
+      "candle_color_weight": 0.3,
       "price_direction_weight": 0.3,
+      "body_ratio_weight": 0.4,
       "volume_factor_weight": 0.3,
       "min_signal_strength": 0.6
     }
@@ -106,3 +107,4 @@
     "theme": "dark",
     "window_size": "1200x800"
   }
+}

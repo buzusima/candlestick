@@ -80,91 +80,92 @@ class SignalGenerator:
     
     def generate_signal(self, candlestick_data: Dict) -> Optional[Dict]:
         """
-        SIMPLE CLOSE COMPARISON:
-        BUY: Close[1] > Close[2]
-        SELL: Close[1] < Close[2]
+        🎯 FINAL CORRECT SIGNAL GENERATION
+        
+        เงื่อนไข:
+        - BUY → if Close[1] > High[2] 
+        - SELL → if Close[1] < Low[2]
         """
         try:
-            print(f"\n=== SIMPLE CLOSE COMPARISON ===")
+            print(f"\n=== 🎯 SIGNAL: Close[1] vs High[2]/Low[2] ===")
             
-            # ดึง candle signature
+            # ตรวจสอบข้อมูล
             candle_signature = candlestick_data.get('candle_signature')
             if not candle_signature:
                 return self._create_wait_signal("No signature")
             
-            # เช็คว่าส่งออเดอร์แล้วหรือยัง
+            # เช็ค lock
             if self._is_order_sent_for_candle(candle_signature):
-                print(f"LOCKED: {candle_signature}")
+                print(f"🚫 LOCKED: {candle_signature}")
                 return None
             
-            # ดึงค่า Close เท่านั้น
-            close_1 = float(candlestick_data.get('close', 0))          # Close[1]
-            close_2 = float(candlestick_data.get('previous_close', 0)) # Close[2]
+            # ดึงข้อมูลที่ถูกต้อง
+            close_1 = float(candlestick_data.get('close', 0))        # Close[1]
+            high_2 = float(candlestick_data.get('previous_high', 0)) # High[2]
+            low_2 = float(candlestick_data.get('previous_low', 0))   # Low[2]
             
-            print(f"COMPARISON:")
+            print(f"📊 DATA:")
             print(f"   Close[1]: {close_1:.4f}")
-            print(f"   Close[2]: {close_2:.4f}")
-            print(f"   Change:   {close_1 - close_2:+.4f}")
+            print(f"   High[2]:  {high_2:.4f}")
+            print(f"   Low[2]:   {low_2:.4f}")
             
-            # BUY: Close[1] > Close[2]
-            if close_1 > close_2:
-                price_diff = close_1 - close_2
+            # เงื่อนไข BUY: Close[1] > High[2]
+            if close_1 > high_2:
+                breakout = close_1 - high_2
                 
-                # ล็อกแท่งนี้
+                print(f"🟢 BUY SIGNAL!")
+                print(f"   Close[1] {close_1:.4f} > High[2] {high_2:.4f}")
+                print(f"   Breakout: +{breakout:.4f}")
+                
                 self._mark_order_sent_for_candle(candle_signature)
                 
-                signal_data = {
+                return {
                     'action': 'BUY',
-                    'strength': min(price_diff * 2, 1.0),
-                    'confidence': 0.8,
+                    'strength': min(breakout * 2.0, 1.0),
+                    'confidence': 0.9,
                     'timestamp': datetime.now(),
                     'signal_id': f"BUY_{datetime.now().strftime('%H%M%S')}",
                     'candle_signature': candle_signature,
                     'close': close_1,
-                    'previous_close': close_2,
-                    'price_difference': price_diff,
-                    'reasons': [f"BUY: {close_1:.4f} > {close_2:.4f} (+{price_diff:.4f})"],
+                    'reference_high': high_2,
+                    'breakout_amount': breakout,
+                    'reasons': [f"BUY: Close[1] {close_1:.4f} > High[2] {high_2:.4f}"],
                     'symbol': candlestick_data.get('symbol', 'XAUUSD.v')
                 }
-                
-                print(f"BUY SIGNAL! Price higher by {price_diff:.4f}")
-                self._record_signal(signal_data)
-                return signal_data
             
-            # SELL: Close[1] < Close[2]
-            elif close_1 < close_2:
-                price_diff = close_2 - close_1
+            # เงื่อนไข SELL: Close[1] < Low[2]
+            elif close_1 < low_2:
+                breakdown = low_2 - close_1
                 
-                # ล็อกแท่งนี้
+                print(f"🔴 SELL SIGNAL!")
+                print(f"   Close[1] {close_1:.4f} < Low[2] {low_2:.4f}")
+                print(f"   Breakdown: -{breakdown:.4f}")
+                
                 self._mark_order_sent_for_candle(candle_signature)
                 
-                signal_data = {
+                return {
                     'action': 'SELL',
-                    'strength': min(price_diff * 2, 1.0),
-                    'confidence': 0.8,
+                    'strength': min(breakdown * 2.0, 1.0),
+                    'confidence': 0.9,
                     'timestamp': datetime.now(),
                     'signal_id': f"SELL_{datetime.now().strftime('%H%M%S')}",
                     'candle_signature': candle_signature,
                     'close': close_1,
-                    'previous_close': close_2,
-                    'price_difference': -price_diff,
-                    'reasons': [f"SELL: {close_1:.4f} < {close_2:.4f} (-{price_diff:.4f})"],
+                    'reference_low': low_2,
+                    'breakdown_amount': breakdown,
+                    'reasons': [f"SELL: Close[1] {close_1:.4f} < Low[2] {low_2:.4f}"],
                     'symbol': candlestick_data.get('symbol', 'XAUUSD.v')
                 }
-                
-                print(f"SELL SIGNAL! Price lower by {price_diff:.4f}")
-                self._record_signal(signal_data)
-                return signal_data
             
-            # Close เท่ากัน
+            # ไม่ตรงเงื่อนไข
             else:
-                print(f"NO SIGNAL - Prices equal: {close_1:.4f} = {close_2:.4f}")
-                return self._create_wait_signal("Prices equal")
+                print(f"⏳ NO SIGNAL: Low[2] {low_2:.4f} <= Close[1] {close_1:.4f} <= High[2] {high_2:.4f}")
+                return self._create_wait_signal("ไม่มี breakout/breakdown")
             
         except Exception as e:
-            print(f"Signal error: {e}")
+            print(f"❌ Signal error: {e}")
             return self._create_wait_signal(f"Error: {e}")
-    
+                            
     def _is_order_sent_for_candle(self, candle_signature: str) -> bool:
         """เช็คว่าส่งออเดอร์สำหรับแท่งนี้แล้วหรือยัง"""
         if not hasattr(self, 'locked_candles'):
@@ -177,12 +178,38 @@ class SignalGenerator:
             self.locked_candles = set()
         
         self.locked_candles.add(candle_signature)
-        print(f"LOCKED: {candle_signature}")
+        print(f"🔒 LOCKED: {candle_signature}")
         
-        # เก็บแค่ 30 แท่งล่าสุด
-        if len(self.locked_candles) > 30:
+        # เก็บแค่ 50 แท่งล่าสุด
+        if len(self.locked_candles) > 50:
             oldest = next(iter(self.locked_candles))
             self.locked_candles.remove(oldest)
+
+    def _record_signal(self, signal_data: Dict):
+        """บันทึก Signal"""
+        try:
+            if not hasattr(self, 'signals_generated'):
+                self.signals_generated = {'BUY': 0, 'SELL': 0, 'WAIT': 0}
+            if not hasattr(self, 'signal_history'):
+                self.signal_history = []
+            if not hasattr(self, 'last_signal_time'):
+                self.last_signal_time = datetime.min
+                
+            action = signal_data.get('action')
+            if action in ['BUY', 'SELL']:
+                self.signals_generated[action] += 1
+                self.signal_history.append({
+                    'action': action,
+                    'strength': signal_data.get('strength', 0),
+                    'timestamp': datetime.now(),
+                    'signal_id': signal_data.get('signal_id')
+                })
+                self.last_signal_time = datetime.now()
+                
+            print(f"📝 Signal recorded: {action}")
+            
+        except Exception as e:
+            print(f"❌ Record signal error: {e}")
 
     def _create_wait_signal(self, reason: str) -> Dict:
         """สร้าง WAIT signal"""

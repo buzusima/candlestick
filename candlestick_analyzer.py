@@ -174,107 +174,113 @@ class CandlestickAnalyzer:
                 
     def get_current_analysis(self) -> Optional[Dict]:
         """
-        DEBUG: ตรวจสอบข้อมูล OHLC ที่ถูกต้อง
+        📊 FINAL CORRECT ANALYSIS
+        
+        🎯 Candle Definition:
+        - Candle[0] = กำลังวิ่ง (ห้ามใช้)
+        - Candle[1] = ปิดล่าสุด (ใช้ Close[1])  
+        - Candle[2] = ปิดก่อนหน้า (ใช้ High[2]/Low[2])
+        
+        🔢 MT5 rates mapping:
+        - rates[0] = Candle[0] (ห้ามใช้)
+        - rates[1] = Candle[1] (ใช้)
+        - rates[2] = Candle[2] (ใช้)
         """
         try:
-            print("=== DEBUG OHLC DATA EXTRACTION ===")
+            print("=== 📊 FINAL CORRECT ANALYSIS ===")
             
             if not self.mt5_connector.is_connected:
                 return None
             
-            # ดึงแท่งเทียน 5 แท่งล่าสุด เพื่อ debug
-            rates = mt5.copy_rates_from_pos(self.symbol, self.timeframe, 0, 5)
+            # ดึงแท่งเทียน 3 แท่งล่าสุด
+            rates = mt5.copy_rates_from_pos(self.symbol, self.timeframe, 0, 3)
             if rates is None or len(rates) < 3:
+                print(f"❌ ต้องการ 3 แท่ง แต่ได้แค่ {len(rates) if rates is not None else 0}")
                 return None
             
-            print(f"DEBUG - All candles:")
-            for i, rate in enumerate(rates[:3]):
-                candle_time = datetime.fromtimestamp(int(rate['time']))
-                o, h, l, c = float(rate['open']), float(rate['high']), float(rate['low']), float(rate['close'])
-                color = "GREEN" if c > o else "RED" if c < o else "DOJI"
-                print(f"   [{i}] {candle_time.strftime('%H:%M')} - O:{o:.4f} H:{h:.4f} L:{l:.4f} C:{c:.4f} ({color})")
+            # ✅ CORRECT MAPPING:
+            # rates[0] = Candle[0] (กำลังวิ่ง) ← ไม่ใช้
+            candle_1_data = rates[1]  # Candle[1] = แท่งที่ปิดล่าสุด
+            candle_2_data = rates[2]  # Candle[2] = แท่งที่ปิดก่อนหน้า
             
-            # ใช้แท่งที่ปิดล่าสุด vs แท่งก่อนหน้า
-            current_raw = rates[1]   # แท่งที่ปิดล่าสุด [1]
-            previous_raw = rates[2]  # แท่งก่อนหน้า [2]
+            # แปลงข้อมูล Candle[1] (แท่งที่ปิดล่าสุด)
+            close_1 = float(candle_1_data['close'])  # 🎯 Close[1] สำหรับเงื่อนไข
+            open_1 = float(candle_1_data['open'])
+            high_1 = float(candle_1_data['high'])
+            low_1 = float(candle_1_data['low'])
+            time_1 = datetime.fromtimestamp(int(candle_1_data['time']))
             
-            candle_timestamp = int(current_raw['time'])
+            # แปลงข้อมูล Candle[2] (แท่งที่ปิดก่อนหน้า)
+            close_2 = float(candle_2_data['close'])
+            open_2 = float(candle_2_data['open'])
+            high_2 = float(candle_2_data['high'])    # 🎯 High[2] สำหรับเงื่อนไข BUY
+            low_2 = float(candle_2_data['low'])      # 🎯 Low[2] สำหรับเงื่อนไข SELL
+            time_2 = datetime.fromtimestamp(int(candle_2_data['time']))
             
-            # เช็คแท่งเดิม
-            if hasattr(self, 'last_processed_candle_time') and self.last_processed_candle_time == candle_timestamp:
-                print(f"SAME CANDLE: {candle_timestamp}")
+            print(f"🔥 FINAL CORRECT DATA:")
+            print(f"   📍 Candle[1] (ปิดล่าสุด): {time_1.strftime('%H:%M')}")
+            print(f"      OHLC: O:{open_1:.4f} H:{high_1:.4f} L:{low_1:.4f} C:{close_1:.4f}")
+            print(f"   📍 Candle[2] (ก่อนหน้า): {time_2.strftime('%H:%M')}")
+            print(f"      OHLC: O:{open_2:.4f} H:{high_2:.4f} L:{low_2:.4f} C:{close_2:.4f}")
+            
+            # ⏰ ตรวจสอบลำดับเวลาให้ถูกต้อง
+            if time_1 <= time_2:
+                print(f"❌ ERROR: ลำดับเวลาผิด!")
+                print(f"   Candle[1]: {time_1} (ต้องใหม่กว่า)")  
+                print(f"   Candle[2]: {time_2} (ต้องเก่ากว่า)")
                 return None
             
-            self.last_processed_candle_time = candle_timestamp
+            print(f"🎯 CONDITION CHECKS:")
+            print(f"   BUY condition:  Close[1] {close_1:.4f} > High[2] {high_2:.4f} ? {close_1 > high_2}")
+            print(f"   SELL condition: Close[1] {close_1:.4f} < Low[2] {low_2:.4f} ?  {close_1 < low_2}")
             
-            # แปลงข้อมูลที่ถูกต้อง
-            close_1 = float(current_raw['close'])    # Close[1] - แท่งที่ปิดล่าสุด
-            close_2 = float(previous_raw['close'])   # Close[2] - แท่งก่อนหน้า
-            open_1 = float(current_raw['open'])      # Open[1]
+            # สร้างลายเซ็น
+            candle_timestamp = int(candle_1_data['time'])
+            candle_signature = f"CORRECT_{candle_timestamp}_{close_1:.2f}_{high_2:.2f}_{low_2:.2f}"
             
-            candle_time = datetime.fromtimestamp(candle_timestamp)
+            # เช็คว่าประมวลผลแล้วหรือยัง
+            if self._is_signature_processed(candle_signature):
+                print(f"🚫 BLOCKED: แท่งนี้ประมวลผลแล้ว")
+                return None
             
-            print(f"CORRECT DATA EXTRACTED:")
-            print(f"   Candle[1] Time: {candle_time.strftime('%H:%M')}")
-            print(f"   Close[1]: {close_1:.4f}")
-            print(f"   Close[2]: {close_2:.4f}")
-            print(f"   Open[1]:  {open_1:.4f}")
+            # มาร์คว่าประมวลผลแล้ว
+            self._mark_signature_processed(candle_signature)
             
-            # เช็คสีแท่ง
-            if close_1 > open_1:
-                candle_color = "GREEN (Close > Open)"
-            elif close_1 < open_1:
-                candle_color = "RED (Close < Open)"
-            else:
-                candle_color = "DOJI (Close = Open)"
-            
-            print(f"   Candle Color: {candle_color}")
-            
-            # เช็คทิศทางราคา
-            price_change = close_1 - close_2
-            if close_1 > close_2:
-                direction = "UP (ปิดสูงกว่าแท่งก่อน)"
-            elif close_1 < close_2:
-                direction = "DOWN (ปิดต่ำกว่าแท่งก่อน)"
-            else:
-                direction = "FLAT (ปิดเท่าแท่งก่อน)"
-                
-            print(f"   Price Direction: {direction}")
-            print(f"   Price Change: {price_change:+.4f}")
-            
-            # คำนวณ body ratio
-            high_1 = float(current_raw['high'])
-            low_1 = float(current_raw['low'])
+            # คำนวณข้อมูลเพิ่มเติม
             candle_range = high_1 - low_1
             body_size = abs(close_1 - open_1)
             body_ratio = body_size / candle_range if candle_range > 0 else 0
-            
-            candle_signature = f"CORRECT_{candle_timestamp}"
             
             return {
                 'symbol': self.symbol,
                 'timestamp': datetime.now(),
                 'candle_signature': candle_signature,
                 'candle_timestamp': candle_timestamp,
-                'candle_time': candle_time,
+                'candle_time': time_1,
                 
-                # ข้อมูลที่ถูกต้อง
-                'close': close_1,           # Close[1] - แท่งที่ปิดล่าสุด
-                'previous_close': close_2,  # Close[2] - แท่งก่อนหน้า
-                'open': open_1,             # Open[1]
-                'high': high_1,             # High[1]
-                'low': low_1,               # Low[1]
+                # ✅ CORRECT: ข้อมูลสำหรับเงื่อนไข Close[1] vs High[2]/Low[2]
+                'close': close_1,           # Close[1] - ปิดแท่งล่าสุด (rates[1])
+                'previous_high': high_2,    # High[2] - สูงสุดแท่งก่อน (rates[2])
+                'previous_low': low_2,      # Low[2] - ต่ำสุดแท่งก่อน (rates[2])
+                'previous_close': close_2,  # Close[2] - ปิดแท่งก่อน (rates[2])
+                
+                # ข้อมูลแท่งล่าสุดทั้งหมด
+                'open': open_1,
+                'high': high_1,
+                'low': low_1,
                 'body_ratio': body_ratio,
-                'price_change': price_change,
-                'candle_color': candle_color,
-                'direction': direction,
-                'method': 'debug_correct_extraction'
+                
+                # ข้อมูลการเปรียบเทียบ
+                'breakout_amount': close_1 - high_2 if close_1 > high_2 else 0,
+                'breakdown_amount': low_2 - close_1 if close_1 < low_2 else 0,
+                
+                'method': 'final_correct_close1_vs_high2_low2'
             }
             
         except Exception as e:
-            print(f"Analysis error: {e}")
+            print(f"❌ Final analysis error: {e}")
             return None
-                                                            
+                                                                                
     def _create_candle_signature(self, candle: Dict) -> str:
         """
         🔑 สร้างลายเซ็น OHLC - PURE OHLC NO TIME VERSION

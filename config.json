@@ -1,7 +1,7 @@
 {
   "system": {
-    "name": "Pure Candlestick Trading System",
-    "version": "1.0.0",
+    "name": "Enhanced Pure Candlestick Trading System",
+    "version": "2.0.0-LotAware",
     "mode": "production",
     "debug_level": "INFO"
   },
@@ -12,22 +12,22 @@
     "market_orders_only": true,
     "signal_cooldown_seconds": 60,
     "max_signals_per_hour": 20,
-    "max_positions": 30,
+    "max_positions": 50,
     "auto_trading": true
   },
   
   "candlestick_rules": {
     "buy_conditions": {
       "candle_color": "green",
-      "price_direction": "higher_close",
+      "price_direction": "higher_close", 
       "min_body_ratio": 0.1,
       "volume_confirmation": false,
       "volume_factor_threshold": 1.2
     },
     "sell_conditions": {
-      "candle_color": "red", 
+      "candle_color": "red",
       "price_direction": "lower_close",
-      "min_body_ratio": 0.1,
+      "min_body_ratio": 0.1, 
       "volume_confirmation": false,
       "volume_factor_threshold": 1.2
     },
@@ -47,9 +47,11 @@
     "max_lot": 1.0,
     "risk_percentage": 2.0,
     "signal_strength_multiplier": 2.0,
+    "lot_efficiency_tracking": true,
+    "volume_scaling_enabled": true,
     "account_factor": {
       "balance_threshold_1": 1000,
-      "balance_threshold_2": 5000,
+      "balance_threshold_2": 5000, 
       "balance_threshold_3": 10000,
       "lot_multiplier_1": 1.0,
       "lot_multiplier_2": 1.5,
@@ -58,53 +60,141 @@
   },
   
   "position_management": {
-    "max_losing_age_hours": 24,
-    "min_profit_to_close": 5.0,
-    "portfolio_balance_threshold": 0.7,
-    "max_total_loss": -500.0,
-    "max_single_loss": -100.0,
-    "margin_level_warning": 200.0,
-    "smart_close_enabled": true,
-    "recovery_close_enabled": true,
-    "emergency_close_enabled": true
+    "_comment": "🆕 ENHANCED LOT-AWARE SETTINGS",
+    
+    "lot_aware_analysis": {
+      "enabled": true,
+      "min_efficiency_per_lot": 50.0,
+      "efficiency_weight": 0.6,
+      "volume_weight": 0.4,
+      "track_profit_per_lot": true
+    },
+    
+    "margin_optimization": {
+      "enabled": true,
+      "margin_efficiency_weight": 0.4,
+      "profit_efficiency_weight": 0.6,
+      "high_margin_usage_threshold": 70.0,
+      "critical_margin_level": 150.0,
+      "margin_pressure_close_threshold": 300.0
+    },
+    
+    "volume_balance": {
+      "enabled": true,
+      "volume_balance_tolerance": 0.3,
+      "max_volume_imbalance": 0.5,
+      "rebalance_net_loss_tolerance": -10.0,
+      "volume_weighted_analysis": true
+    },
+    
+    "partial_closing": {
+      "enabled": true,
+      "min_partial_volume": 0.01,
+      "partial_close_efficiency_threshold": 0.8,
+      "allow_position_splitting": false
+    },
+    
+    "traditional_settings": {
+      "max_losing_age_hours": 24,
+      "min_net_profit_to_close": 2.0,
+      "portfolio_balance_threshold": 0.65,
+      "max_total_loss": -500.0,
+      "max_single_loss": -100.0,
+      "margin_level_warning": 200.0
+    },
+    
+    "smart_close_priorities": {
+      "margin_optimization": 1,
+      "volume_balance": 2, 
+      "lot_aware_recovery": 3,
+      "enhanced_profit_target": 4,
+      "emergency_close": 0
+    },
+    
+    "recovery_settings": {
+      "min_volume_match_ratio": 0.7,
+      "max_recovery_positions": 3,
+      "net_profit_tolerance": -5.0,
+      "hedge_search_depth": 5
+    }
   },
   
   "risk_management": {
-    "max_positions": 30,
-    "max_buy_positions": 20,
-    "max_sell_positions": 20,
+    "max_positions": 50,
+    "max_buy_positions": 30,
+    "max_sell_positions": 30,
     "risk_per_trade_percent": 2.0,
     "max_risk_per_trade": 100.0,
-    "max_daily_trades": 50,
-    "max_daily_loss": -200.0,
-    "max_daily_volume": 10.0,
-    "min_margin_level": 200.0,
-    "stop_trading_margin_level": 150.0,
-    "max_drawdown_percent": 10.0,
-    "emergency_close_loss": -500.0,
-    "max_consecutive_losses": 5
+    
+    "daily_limits": {
+      "max_daily_trades": 50,
+      "max_daily_loss": -200.0,
+      "max_daily_volume": 20.0
+    },
+    
+    "margin_management": {
+      "min_margin_level": 200.0,
+      "stop_trading_margin_level": 150.0,
+      "emergency_close_margin_level": 100.0,
+      "margin_usage_warning": 75.0
+    },
+    
+    "drawdown_protection": {
+      "max_drawdown_percent": 10.0,
+      "emergency_close_loss": -500.0,
+      "max_consecutive_losses": 5,
+      "loss_streak_protection": true
+    },
+    
+    "lot_aware_risk": {
+      "max_volume_concentration": 0.4,
+      "efficiency_risk_threshold": -100.0,
+      "volume_imbalance_risk_level": 0.6
+    }
   },
   
   "api_backend": {
     "enabled": false,
-    "base_url": "http://123.253.62.50:8080/api",
+    "base_url": "http://123.253.62.50:8080/api", 
     "timeout": 10,
-    "bot_name": "PureCandlestick",
-    "bot_version": "1.0.0"
+    "bot_name": "EnhancedPureCandlestick",
+    "bot_version": "2.0.0"
   },
   
   "performance_tracking": {
     "profit_threshold": 1.0,
     "loss_threshold": -1.0,
     "export_enabled": true,
-    "max_history_records": 1000
+    "max_history_records": 1000,
+    
+    "lot_performance_tracking": {
+      "enabled": true,
+      "track_efficiency_by_lot_size": true,
+      "efficiency_benchmarks": [25.0, 50.0, 100.0, 200.0],
+      "volume_performance_analysis": true
+    },
+    
+    "margin_performance_tracking": {
+      "enabled": true,
+      "track_margin_efficiency": true,
+      "margin_roi_calculation": true,
+      "margin_usage_optimization": true
+    }
   },
   
   "gui_settings": {
     "update_interval_seconds": 3,
-    "cache_duration_seconds": 5,
+    "cache_duration_seconds": 3,
     "max_log_lines": 100,
     "theme": "dark",
-    "window_size": "1200x800"
+    "window_size": "1400x900",
+    
+    "enhanced_displays": {
+      "show_lot_efficiency": true,
+      "show_margin_analysis": true,
+      "show_volume_balance": true,
+      "show_close_suggestions": true,
+      "efficiency_color_coding": true
+    }
   }
 }

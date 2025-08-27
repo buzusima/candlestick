@@ -1,0 +1,23 @@
+{
+  "session_duration_hours": 0.008588468333333333,
+  "total_signals": 8,
+  "total_orders": 8,
+  "total_profit": 0.0,
+  "winning_trades": 0,
+  "losing_trades": 0,
+  "break_even_trades": 0,
+  "win_rate": 0.0,
+  "avg_profit_per_trade": 0.0,
+  "profit_factor": 0.0,
+  "execution_rate": 1.0,
+  "signal_accuracy": 0,
+  "best_pattern": "standard",
+  "worst_pattern": "standard",
+  "pattern_count": 1,
+  "avg_execution_time_ms": 219.34375,
+  "signals_per_hour": 931.4815738390295,
+  "symbol": "XAUUSD.v",
+  "last_update": "2025-08-27 21:46:58.018205",
+  "last_updated": "2025-08-27T21:46:58.018205",
+  "session_count": 1
+}

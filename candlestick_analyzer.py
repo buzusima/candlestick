@@ -174,95 +174,107 @@ class CandlestickAnalyzer:
                 
     def get_current_analysis(self) -> Optional[Dict]:
         """
-        ใช้ candle time + OHLC เป็น unique signature
-        เพื่อให้ 1 แท่ง = 1 order เท่านั้น
+        DEBUG: ตรวจสอบข้อมูล OHLC ที่ถูกต้อง
         """
         try:
-            print("=== STRICT ONE CANDLE ONE ORDER ===")
+            print("=== DEBUG OHLC DATA EXTRACTION ===")
             
             if not self.mt5_connector.is_connected:
                 return None
             
-            # ดึงแท่งเทียน 3 แท่งล่าสุด
-            rates = mt5.copy_rates_from_pos(self.symbol, self.timeframe, 0, 3)
+            # ดึงแท่งเทียน 5 แท่งล่าสุด เพื่อ debug
+            rates = mt5.copy_rates_from_pos(self.symbol, self.timeframe, 0, 5)
             if rates is None or len(rates) < 3:
                 return None
             
-            # ใช้แท่งที่ปิดแล้วเท่านั้น
-            current_raw = rates[1]   # แท่งที่ปิดล่าสุด
-            previous_raw = rates[2]  # แท่งก่อนหน้า
+            print(f"DEBUG - All candles:")
+            for i, rate in enumerate(rates[:3]):
+                candle_time = datetime.fromtimestamp(int(rate['time']))
+                o, h, l, c = float(rate['open']), float(rate['high']), float(rate['low']), float(rate['close'])
+                color = "GREEN" if c > o else "RED" if c < o else "DOJI"
+                print(f"   [{i}] {candle_time.strftime('%H:%M')} - O:{o:.4f} H:{h:.4f} L:{l:.4f} C:{c:.4f} ({color})")
             
-            # แปลงข้อมูลแท่งที่ปิดล่าสุด
-            current = {
-                'time': datetime.fromtimestamp(int(current_raw['time'])),
-                'open': float(current_raw['open']),
-                'high': float(current_raw['high']),
-                'low': float(current_raw['low']),
-                'close': float(current_raw['close'])
-            }
+            # ใช้แท่งที่ปิดล่าสุด vs แท่งก่อนหน้า
+            current_raw = rates[1]   # แท่งที่ปิดล่าสุด [1]
+            previous_raw = rates[2]  # แท่งก่อนหน้า [2]
             
-            # แปลงข้อมูลแท่งก่อนหน้า
-            previous = {
-                'time': datetime.fromtimestamp(int(previous_raw['time'])),
-                'open': float(previous_raw['open']),
-                'high': float(previous_raw['high']),
-                'low': float(previous_raw['low']),
-                'close': float(previous_raw['close'])
-            }
+            candle_timestamp = int(current_raw['time'])
             
-            print(f"Current candle: {current['time'].strftime('%H:%M')} - O:{current['open']:.2f} C:{current['close']:.2f}")
-            print(f"Previous candle: {previous['time'].strftime('%H:%M')} - O:{previous['open']:.2f} C:{previous['close']:.2f}")
-            
-            # สร้าง unique signature = timestamp + OHLC
-            timestamp_str = str(int(current_raw['time']))
-            candle_signature = f"{timestamp_str}_{current['open']:.2f}_{current['high']:.2f}_{current['low']:.2f}_{current['close']:.2f}"
-            
-            print(f"Unique signature: {candle_signature}")
-            
-            # เช็คว่าประมวลผลแล้วหรือยัง
-            if self._is_signature_processed(candle_signature):
-                print("BLOCKED: แท่งนี้ประมวลผลแล้ว")
+            # เช็คแท่งเดิม
+            if hasattr(self, 'last_processed_candle_time') and self.last_processed_candle_time == candle_timestamp:
+                print(f"SAME CANDLE: {candle_timestamp}")
                 return None
             
+            self.last_processed_candle_time = candle_timestamp
+            
+            # แปลงข้อมูลที่ถูกต้อง
+            close_1 = float(current_raw['close'])    # Close[1] - แท่งที่ปิดล่าสุด
+            close_2 = float(previous_raw['close'])   # Close[2] - แท่งก่อนหน้า
+            open_1 = float(current_raw['open'])      # Open[1]
+            
+            candle_time = datetime.fromtimestamp(candle_timestamp)
+            
+            print(f"CORRECT DATA EXTRACTED:")
+            print(f"   Candle[1] Time: {candle_time.strftime('%H:%M')}")
+            print(f"   Close[1]: {close_1:.4f}")
+            print(f"   Close[2]: {close_2:.4f}")
+            print(f"   Open[1]:  {open_1:.4f}")
+            
+            # เช็คสีแท่ง
+            if close_1 > open_1:
+                candle_color = "GREEN (Close > Open)"
+            elif close_1 < open_1:
+                candle_color = "RED (Close < Open)"
+            else:
+                candle_color = "DOJI (Close = Open)"
+            
+            print(f"   Candle Color: {candle_color}")
+            
+            # เช็คทิศทางราคา
+            price_change = close_1 - close_2
+            if close_1 > close_2:
+                direction = "UP (ปิดสูงกว่าแท่งก่อน)"
+            elif close_1 < close_2:
+                direction = "DOWN (ปิดต่ำกว่าแท่งก่อน)"
+            else:
+                direction = "FLAT (ปิดเท่าแท่งก่อน)"
+                
+            print(f"   Price Direction: {direction}")
+            print(f"   Price Change: {price_change:+.4f}")
+            
             # คำนวณ body ratio
-            candle_range = current['high'] - current['low']
-            body_size = abs(current['close'] - current['open'])
+            high_1 = float(current_raw['high'])
+            low_1 = float(current_raw['low'])
+            candle_range = high_1 - low_1
+            body_size = abs(close_1 - open_1)
             body_ratio = body_size / candle_range if candle_range > 0 else 0
             
-            print(f"Body ratio: {body_ratio:.3f}")
+            candle_signature = f"CORRECT_{candle_timestamp}"
             
             return {
                 'symbol': self.symbol,
                 'timestamp': datetime.now(),
                 'candle_signature': candle_signature,
-                'candle_time': current['time'],
+                'candle_timestamp': candle_timestamp,
+                'candle_time': candle_time,
                 
-                # ข้อมูลแท่งปัจจุบัน (ที่ปิดแล้ว)
-                'open': current['open'],
-                'high': current['high'],
-                'low': current['low'],
-                'close': current['close'],
-                
-                # ข้อมูลแท่งก่อนหน้า
-                'previous_open': previous['open'],
-                'previous_high': previous['high'],
-                'previous_low': previous['low'],
-                'previous_close': previous['close'],
-                
-                # การวิเคราะห์
+                # ข้อมูลที่ถูกต้อง
+                'close': close_1,           # Close[1] - แท่งที่ปิดล่าสุด
+                'previous_close': close_2,  # Close[2] - แท่งก่อนหน้า
+                'open': open_1,             # Open[1]
+                'high': high_1,             # High[1]
+                'low': low_1,               # Low[1]
                 'body_ratio': body_ratio,
-                'body_size': body_size,
-                'candle_range': candle_range,
-                
-                # metadata
-                'pattern_name': 'unique_candle_strict',
-                'analysis_method': 'one_candle_one_order'
+                'price_change': price_change,
+                'candle_color': candle_color,
+                'direction': direction,
+                'method': 'debug_correct_extraction'
             }
             
         except Exception as e:
             print(f"Analysis error: {e}")
             return None
-                                                        
+                                                            
     def _create_candle_signature(self, candle: Dict) -> str:
         """
         🔑 สร้างลายเซ็น OHLC - PURE OHLC NO TIME VERSION
@@ -293,55 +305,43 @@ class CandlestickAnalyzer:
 
     def _is_signature_processed(self, signature: str) -> bool:
         """
-        เข้มงวด: 1 แท่ง = 1 order เท่านั้น
-        ใช้ candle time + OHLC เป็น unique signature
+        🔒 STRICT: เช็คว่าแท่งนี้ประมวลผลแล้วหรือยัง
+        ถ้าแล้ว = บล็อกตลอดไป (จนกว่าจะรีสตาร์ทระบบ)
         """
         try:
-            print(f"Checking signature: {signature}")
-            
-            # ใช้ signature เต็ม (OHLC + time) เป็น unique key
             is_processed = signature in self.processed_signatures
             
             if is_processed:
-                print(f"BLOCKED: แท่งนี้ส่ง signal แล้ว")
-                return True  # บล็อกไม่ให้ส่งซ้ำ
+                print(f"🚫 PERMANENTLY BLOCKED: แท่งนี้ประมวลผลแล้ว")
+                return True
             else:
-                print(f"ALLOWED: แท่งใหม่ - อนุญาตส่ง signal")
-                # เก็บ signature ไว้
-                self.processed_signatures.add(signature)
-                
-                # จำกัด signature ไม่เกิน 100 รายการ
-                if len(self.processed_signatures) > 100:
-                    # ลบ signature เก่าสุด
-                    oldest = next(iter(self.processed_signatures))
-                    self.processed_signatures.remove(oldest)
-                    print(f"Removed oldest signature: {oldest}")
-                
+                print(f"✅ NEW CANDLE: อนุญาตให้ประมวลผล")
                 return False
-            
+                
         except Exception as e:
             print(f"Signature check error: {e}")
-            return False  # ถ้า error ให้ส่งได้
+            return False
 
     def _mark_signature_processed(self, signature: str):
         """
-        ✅ บันทึกลายเซ็น OHLC ว่าประมวลผลแล้ว - NO TIME VERSION
+        🔒 STRICT: บันทึกแท่งที่ประมวลผลแล้ว - ไม่มีการลบ
         """
         try:
             self.processed_signatures.add(signature)
             
-            # เก็บแค่ 20 ลายเซ็นล่าสุด (ลดลงเพราะไม่มี timestamp)
-            if len(self.processed_signatures) > 20:
-                # ลบแบบ FIFO - เอาตัวแรกออก
-                oldest_signature = next(iter(self.processed_signatures))
+            # จำกัดจำนวนเพื่อไม่ให้ memory เต็ม (เก็บ 500 แท่งล่าสุด)
+            if len(self.processed_signatures) > 500:
+                # แปลง set เป็น list เพื่อลบตัวเก่าสุด
+                sorted_signatures = sorted(list(self.processed_signatures))
+                oldest_signature = sorted_signatures[0]
                 self.processed_signatures.remove(oldest_signature)
-                print(f"🗑️ Removed oldest OHLC: {oldest_signature}")
+                print(f"🗑️ Removed oldest signature to save memory")
             
-            print(f"✅ OHLC Signature processed: {signature}")
-            print(f"   Total processed: {len(self.processed_signatures)}")
+            print(f"🔒 PERMANENTLY MARKED: {signature}")
+            print(f"📊 Total processed candles: {len(self.processed_signatures)}")
             
         except Exception as e:
-            print(f"❌ Mark signature error: {e}")
+            print(f"Mark signature error: {e}")
 
     def _extract_timestamp_from_signature(self, signature: str) -> float:
         """

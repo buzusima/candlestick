@@ -81,36 +81,47 @@ class SignalGenerator:
 
     def generate_signal(self, candlestick_data: Dict) -> Optional[Dict]:
         """
-        🎯 สร้าง Signal - CLEAN VERSION (ไม่มี min_signal_strength)
-        
-        เงื่อนไขง่ายๆ:
-        - BUY: ราคาปิดสูงกว่าแท่งก่อน + body แข็งแกร่ง
-        - SELL: ราคาปิดต่ำกว่าแท่งก่อน + body แข็งแกร่ง
+        เงื่อนไขที่ถูกต้อง:
+        BUY: Close[1] > Close[2] AND Close[1] > Open[1]
+        SELL: Close[1] < Close[2] AND Close[1] < Open[1]
         """
         try:
-            print(f"\n=== 🎯 SIGNAL GENERATION (CLEAN) ===")
+            print(f"\n=== CORRECT SIGNAL CONDITIONS ===")
             
             # ตรวจสอบ rate limiting
             if not self._can_generate_signal():
                 return self._create_wait_signal("Rate limited")
             
-            # ดึงข้อมูลราคา
-            current_close = float(candlestick_data.get('close', 0))
-            previous_close = float(candlestick_data.get('previous_close', 0))
+            # ดึงข้อมูล
+            close_1 = float(candlestick_data.get('close', 0))         # Close[1] - แท่งปิดล่าสุด
+            open_1 = float(candlestick_data.get('open', 0))           # Open[1] - แท่งปิดล่าสุด
+            close_2 = float(candlestick_data.get('previous_close', 0)) # Close[2] - แท่งก่อนหน้า
             body_ratio = float(candlestick_data.get('body_ratio', 0))
             
-            print(f"📊 ข้อมูล:")
-            print(f"   ปิดปัจจุบัน: {current_close:.2f}")
-            print(f"   ปิดแท่งก่อน: {previous_close:.2f}")
-            print(f"   ต่างกัน: {current_close - previous_close:+.2f}")
-            print(f"   Body: {body_ratio:.3f}")
+            print(f"แท่ง 1: Open={open_1:.2f}, Close={close_1:.2f}")
+            print(f"แท่ง 2: Close={close_2:.2f}")
             
-            # เงื่อนไขง่ายๆ
-            min_body = 0.1  # 10%
+            # เงื่อนไขพื้นฐาน
+            min_body_ratio = 0.01
+            min_price_diff = 0.05
             
-            # BUY: ปิดสูงกว่า + body พอ
-            if current_close > previous_close and body_ratio >= min_body:
-                signal_strength = min(abs(current_close - previous_close) / 3.0, 1.0)
+            if body_ratio < min_body_ratio:
+                return self._create_wait_signal(f"Body ต่ำ: {body_ratio:.3f}")
+            
+            # ตรวจสอบเงื่อนไข BUY
+            condition_close_higher = close_1 > close_2  # Close[1] > Close[2]
+            condition_green_candle = close_1 > open_1   # Close[1] > Open[1] (แท่งเขียว)
+            price_diff_1_2 = close_1 - close_2
+            
+            print(f"BUY Conditions:")
+            print(f"  Close[1] > Close[2]: {close_1:.2f} > {close_2:.2f} = {condition_close_higher}")
+            print(f"  Close[1] > Open[1]: {close_1:.2f} > {open_1:.2f} = {condition_green_candle}")
+            print(f"  Price diff: {price_diff_1_2:+.2f}")
+            
+            if condition_close_higher and condition_green_candle and abs(price_diff_1_2) >= min_price_diff:
+                signal_strength = min(abs(price_diff_1_2) / 2.0, 1.0)
+                
+                print(f"✅ BUY SIGNAL: แท่งเขียวปิดสูงกว่าแท่งก่อน")
                 
                 signal_data = {
                     'action': 'BUY',
@@ -118,21 +129,30 @@ class SignalGenerator:
                     'confidence': signal_strength,
                     'timestamp': datetime.now(),
                     'signal_id': f"BUY_{datetime.now().strftime('%H%M%S')}",
-                    'close': current_close,
-                    'previous_close': previous_close,
-                    'body_ratio': body_ratio,
-                    'price_change': current_close - previous_close,
-                    'reasons': [f"📈 ปิดสูงกว่า +{current_close - previous_close:.2f}"],
+                    'close': close_1,
+                    'open': open_1,
+                    'previous_close': close_2,
+                    'price_difference': price_diff_1_2,
+                    'candle_color': 'green',
+                    'reasons': [f"Close[1]>Close[2] AND Green: {close_1:.2f}>{close_2:.2f} AND {close_1:.2f}>{open_1:.2f}"],
                     'symbol': candlestick_data.get('symbol', 'XAUUSD.v')
                 }
                 
-                print(f"✅ BUY SIGNAL: ปิดคุมขาขึ้น (Strength: {signal_strength:.3f})")
                 self._record_signal(signal_data)
                 return signal_data
             
-            # SELL: ปิดต่ำกว่า + body พอ
-            elif current_close < previous_close and body_ratio >= min_body:
-                signal_strength = min(abs(previous_close - current_close) / 3.0, 1.0)
+            # ตรวจสอบเงื่อนไข SELL
+            condition_close_lower = close_1 < close_2   # Close[1] < Close[2]
+            condition_red_candle = close_1 < open_1     # Close[1] < Open[1] (แท่งแดง)
+            
+            print(f"SELL Conditions:")
+            print(f"  Close[1] < Close[2]: {close_1:.2f} < {close_2:.2f} = {condition_close_lower}")
+            print(f"  Close[1] < Open[1]: {close_1:.2f} < {open_1:.2f} = {condition_red_candle}")
+            
+            if condition_close_lower and condition_red_candle and abs(price_diff_1_2) >= min_price_diff:
+                signal_strength = min(abs(price_diff_1_2) / 2.0, 1.0)
+                
+                print(f"✅ SELL SIGNAL: แท่งแดงปิดต่ำกว่าแท่งก่อน")
                 
                 signal_data = {
                     'action': 'SELL',
@@ -140,27 +160,35 @@ class SignalGenerator:
                     'confidence': signal_strength,
                     'timestamp': datetime.now(),
                     'signal_id': f"SELL_{datetime.now().strftime('%H%M%S')}",
-                    'close': current_close,
-                    'previous_close': previous_close,
-                    'body_ratio': body_ratio,
-                    'price_change': current_close - previous_close,
-                    'reasons': [f"📉 ปิดต่ำกว่า {current_close - previous_close:.2f}"],
+                    'close': close_1,
+                    'open': open_1,
+                    'previous_close': close_2,
+                    'price_difference': price_diff_1_2,
+                    'candle_color': 'red',
+                    'reasons': [f"Close[1]<Close[2] AND Red: {close_1:.2f}<{close_2:.2f} AND {close_1:.2f}<{open_1:.2f}"],
                     'symbol': candlestick_data.get('symbol', 'XAUUSD.v')
                 }
                 
-                print(f"✅ SELL SIGNAL: ปิดคุมขาลง (Strength: {signal_strength:.3f})")
                 self._record_signal(signal_data)
                 return signal_data
             
             # ไม่ตรงเงื่อนไข
+            print(f"⏳ WAIT: เงื่อนไขไม่ครบ")
+            if not condition_close_higher and not condition_close_lower:
+                reason = "Close เท่ากัน"
+            elif condition_close_higher and not condition_green_candle:
+                reason = "ปิดสูงกว่าแต่ไม่เป็นแท่งเขียว"
+            elif condition_close_lower and not condition_red_candle:
+                reason = "ปิดต่ำกว่าแต่ไม่เป็นแท่งแดง"
             else:
-                print(f"⏳ WAIT: เงื่อนไขไม่ครบ")
-                return self._create_wait_signal("เงื่อนไขไม่ครบ")
+                reason = "ต่างกันน้อย"
+                
+            return self._create_wait_signal(reason)
             
         except Exception as e:
-            print(f"❌ Signal error: {e}")
+            print(f"Signal error: {e}")
             return self._create_wait_signal(f"Error: {e}")
-
+                        
     def _mark_signal_sent_for_signature(self, signature: str):
         """
         ✅ บันทึกว่าส่ง signal สำหรับลายเซ็นนี้แล้ว

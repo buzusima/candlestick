@@ -549,8 +549,8 @@ class PureCandlestickGUI:
             self.log(f"❌ Stop trading error: {e}")
     
     def trading_loop(self):
-        """หลัก Trading Loop - Pure Candlestick Logic"""
-        self.log("🔄 Pure Candlestick trading loop started")
+        """หลัก Trading Loop - แก้ไขให้หยุดเมื่อไม่มี candlestick data ใหม่"""
+        self.log("Pure Candlestick trading loop started")
         
         while self.is_trading:
             try:
@@ -558,32 +558,37 @@ class PureCandlestickGUI:
                 if self.candlestick_analyzer:
                     candlestick_data = self.candlestick_analyzer.get_current_analysis()
                     
-                    if candlestick_data:
-                        # Update display
-                        self.update_candlestick_display_from_data(candlestick_data)
+                    # ถ้าไม่มีข้อมูลใหม่ (แท่งเดิมหรือ blocked) ให้ข้าม
+                    if not candlestick_data:
+                        print("No new candlestick data - skipping cycle")
+                        time.sleep(3)
+                        continue
+                    
+                    # Update display
+                    self.update_candlestick_display_from_data(candlestick_data)
+                    
+                    # 2. สร้าง signal
+                    if self.signal_generator:
+                        signal_data = self.signal_generator.generate_signal(candlestick_data)
                         
-                        # 2. สร้าง signal
-                        if self.signal_generator:
-                            signal_data = self.signal_generator.generate_signal(candlestick_data)
+                        if signal_data and signal_data.get('action') != 'WAIT':
+                            # Update signal display
+                            self.update_signal_display(signal_data)
                             
-                            if signal_data and signal_data.get('action') != 'WAIT':
-                                # Update signal display
-                                self.update_signal_display(signal_data)
+                            # บันทึก signal ใน performance tracker
+                            if self.performance_tracker:
+                                self.performance_tracker.record_signal(signal_data)
+                            
+                            # 3. ส่งออเดอร์ (ถ้ามี signal)
+                            if self.order_executor:
+                                execution_result = self.order_executor.execute_signal(signal_data)
                                 
-                                # บันทึก signal ใน performance tracker
-                                if self.performance_tracker:
-                                    self.performance_tracker.record_signal(signal_data)
-                                
-                                # 3. ส่งออเดอร์ (ถ้ามี signal)
-                                if self.order_executor:
-                                    execution_result = self.order_executor.execute_signal(signal_data)
+                                if execution_result:
+                                    self.log(f"Order executed: {signal_data.get('action')} - {execution_result.get('success', False)}")
                                     
-                                    if execution_result:
-                                        self.log(f"✅ Order executed: {signal_data.get('action')} - {execution_result.get('success', False)}")
-                                        
-                                        # บันทึก execution ใน performance tracker
-                                        if self.performance_tracker:
-                                            self.performance_tracker.record_execution(execution_result, signal_data)
+                                    # บันทึก execution ใน performance tracker
+                                    if self.performance_tracker:
+                                        self.performance_tracker.record_execution(execution_result, signal_data)
                 
                 # 4. ติดตาม positions
                 if self.position_monitor:
@@ -593,12 +598,12 @@ class PureCandlestickGUI:
                     # ตรวจสอบการปิดออเดอร์อัจฉริยะ
                     close_actions = self.position_monitor.check_smart_close_opportunities()
                     if close_actions:
-                        self.log(f"🎯 Smart close opportunities: {len(close_actions)}")
+                        self.log(f"Smart close opportunities: {len(close_actions)}")
                         for action in close_actions[:2]:  # ทำแค่ 2 actions ต่อ cycle
                             if self.position_monitor.execute_close_action(action):
-                                self.log(f"✅ Smart close executed: {action.get('action_type')}")
+                                self.log(f"Smart close executed: {action.get('action_type')}")
                 
-                # 5. อัพเดท performance
+                # 5. อัพเดต performance
                 if self.performance_tracker:
                     performance = self.performance_tracker.get_current_metrics()
                     self.update_performance_display_from_data(performance)
@@ -607,7 +612,7 @@ class PureCandlestickGUI:
                 if self.risk_manager:
                     risk_status = self.risk_manager.check_risk_levels()
                     if risk_status.get('emergency_stop', False):
-                        self.log("🚨 EMERGENCY STOP triggered by risk manager!")
+                        self.log("EMERGENCY STOP triggered by risk manager!")
                         self.emergency_close_all()
                         break
                 
@@ -615,11 +620,11 @@ class PureCandlestickGUI:
                 time.sleep(3)  # ทุก 3 วินาที
                 
             except Exception as e:
-                self.log(f"❌ Trading loop error: {e}")
+                self.log(f"Trading loop error: {e}")
                 time.sleep(5)  # รอนานกว่าถ้าเกิด error
         
-        self.log("🔄 Pure Candlestick trading loop ended")
-    
+        self.log("Pure Candlestick trading loop ended")
+
     # ==========================================
     # 📊 DISPLAY UPDATE METHODS
     # ==========================================

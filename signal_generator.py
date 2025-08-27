@@ -80,116 +80,101 @@ class SignalGenerator:
     
     def generate_signal(self, candlestick_data: Dict) -> Optional[Dict]:
         """
-        🎯 SIMPLE SIGNAL GENERATION
-        
-        เงื่อนไขง่ายๆ:
-        - BUY → ปิดสูงกว่าแท่งก่อน
-        - SELL → ปิดต่ำกว่าแท่งก่อน
-        - 1 แท่งต่อ 1 ออเดอร์
+        Lock เข้มงวด - ป้องกันส่งซ้ำ 100%
         """
         try:
-            print(f"\n=== 🎯 SIMPLE SIGNAL GENERATION ===")
+            if not candlestick_data:
+                return self._create_wait_signal("No data")
             
-            # ตรวจสอบข้อมูล
-            candle_signature = candlestick_data.get('candle_signature')
-            if not candle_signature:
-                return self._create_wait_signal("No signature")
+            # ดึง timestamp จากข้อมูล
+            candle_timestamp = candlestick_data.get('candle_timestamp')
+            if not candle_timestamp:
+                return self._create_wait_signal("No timestamp")
             
-            # เช็ค lock แท่ง
-            if self._is_order_sent_for_candle(candle_signature):
-                print(f"🚫 LOCKED: {candle_signature}")
+            # เช็ค signal lock เข้มงวด
+            if not hasattr(self, 'sent_signal_timestamps'):
+                self.sent_signal_timestamps = set()
+            
+            if candle_timestamp in self.sent_signal_timestamps:
+                print(f"SIGNAL BLOCKED - timestamp {candle_timestamp} already sent")
                 return None
             
-            # ดึงราคา
-            current_close = float(candlestick_data.get('close', 0))
-            previous_close = float(candlestick_data.get('previous_close', 0))
+            # ดึงข้อมูลการ breakout/breakdown
+            is_breakout = candlestick_data.get('breakout_detected', False)
+            is_breakdown = candlestick_data.get('breakdown_detected', False)
             
-            if current_close <= 0 or previous_close <= 0:
-                print(f"❌ Invalid prices: current={current_close}, previous={previous_close}")
-                return self._create_wait_signal("Invalid price data")
+            if not (is_breakout or is_breakdown):
+                return self._create_wait_signal("No breakout/breakdown")
             
-            print(f"💰 PRICE COMPARISON:")
-            print(f"   Current Close:  {current_close:.4f}")
-            print(f"   Previous Close: {previous_close:.4f}")
+            # Lock timestamp นี้ทันที
+            self.sent_signal_timestamps.add(candle_timestamp)
+            print(f"SIGNAL TIMESTAMP LOCKED: {candle_timestamp}")
             
-            price_diff = current_close - previous_close
-            print(f"   Difference: {price_diff:+.4f}")
+            # เก็บแค่ 20 timestamps
+            if len(self.sent_signal_timestamps) > 20:
+                timestamps_list = sorted(list(self.sent_signal_timestamps))
+                self.sent_signal_timestamps = set(timestamps_list[-10:])
             
-            # เงื่อนไขง่ายๆ
-            if price_diff > 0:
-                # ปิดสูงกว่า = BUY
-                print(f"🟢 BUY SIGNAL: ปิดสูงกว่าแท่งก่อน (+{price_diff:.4f})")
-                
-                self._mark_order_sent_for_candle(candle_signature)
-                
-                return {
-                    'action': 'BUY',
-                    'strength': min(abs(price_diff) / 2.0, 1.0),  # คำนวณจาก price difference
-                    'confidence': 0.8,
-                    'timestamp': datetime.now(),
-                    'signal_id': f"BUY_{datetime.now().strftime('%H%M%S')}",
-                    'candle_signature': candle_signature,
-                    'close': current_close,
-                    'previous_close': previous_close,
-                    'price_difference': price_diff,
-                    'reasons': [f"BUY: ปิด {current_close:.4f} > ก่อน {previous_close:.4f}"],
-                    'symbol': candlestick_data.get('symbol', 'XAUUSD.v')
-                }
-                
-            elif price_diff < 0:
-                # ปิดต่ำกว่า = SELL
-                print(f"🔴 SELL SIGNAL: ปิดต่ำกว่าแท่งก่อน ({price_diff:.4f})")
-                
-                self._mark_order_sent_for_candle(candle_signature)
-                
-                return {
-                    'action': 'SELL', 
-                    'strength': min(abs(price_diff) / 2.0, 1.0),
-                    'confidence': 0.8,
-                    'timestamp': datetime.now(),
-                    'signal_id': f"SELL_{datetime.now().strftime('%H%M%S')}",
-                    'candle_signature': candle_signature,
-                    'close': current_close,
-                    'previous_close': previous_close,
-                    'price_difference': price_diff,
-                    'reasons': [f"SELL: ปิด {current_close:.4f} < ก่อน {previous_close:.4f}"],
-                    'symbol': candlestick_data.get('symbol', 'XAUUSD.v')
-                }
-                
+            if is_breakout:
+                action = 'BUY'
+                amount = candlestick_data.get('breakout_amount', 0)
             else:
-                # ปิดเท่ากัน = รอ
-                print(f"⏳ NO SIGNAL: ปิดเท่ากับแท่งก่อน ({current_close:.4f})")
-                return self._create_wait_signal("ราคาปิดเท่ากัน")
+                action = 'SELL'
+                amount = candlestick_data.get('breakdown_amount', 0)
+            
+            print(f"SIGNAL CONFIRMED: {action} for timestamp {candle_timestamp}")
+            
+            return {
+                'action': action,
+                'strength': min(0.7 + (amount / 10.0), 1.0),
+                'confidence': 0.9,
+                'timestamp': datetime.now(),
+                'signal_id': f"{action}_{candle_timestamp}",
+                'candle_signature': f"SIGNAL_{candle_timestamp}",
+                'candle_timestamp': candle_timestamp,
+                'close': candlestick_data.get('close'),
+                'amount': amount,
+                'symbol': candlestick_data.get('symbol', 'XAUUSD.v')
+            }
             
         except Exception as e:
-            print(f"❌ Simple signal error: {e}")
+            print(f"Signal error: {e}")
             return self._create_wait_signal(f"Error: {e}")
-                                
-    def _is_order_sent_for_candle(self, candle_signature: str) -> bool:
-        """เช็คว่าส่งออเดอร์สำหรับแท่งนี้แล้วหรือยัง - FIXED"""
-        if not hasattr(self, 'locked_candles'):
-            self.locked_candles = set()
-        
-        is_locked = candle_signature in self.locked_candles
-        print(f"🔒 Lock check: {candle_signature} → {'LOCKED' if is_locked else 'FREE'}")
-        
-        return is_locked
+            
+    def _is_signal_sent_for_signature(self, signature: str) -> bool:
+        """🔒 เช็คว่าส่ง signal สำหรับแท่งนี้แล้วหรือยัง"""
+        try:
+            if not hasattr(self, 'signal_signatures'):
+                self.signal_signatures = set()
+            
+            is_sent = signature in self.signal_signatures
+            print(f"🔍 Signal check: {signature} → {'SENT' if is_sent else 'NEW'}")
+            
+            return is_sent
+            
+        except Exception as e:
+            print(f"❌ Signal signature check error: {e}")
+            return False
 
-    def _mark_order_sent_for_candle(self, candle_signature: str):
-        """ล็อกแท่งที่ส่งออเดอร์แล้ว - FIXED"""
-        if not hasattr(self, 'locked_candles'):
-            self.locked_candles = set()
-        
-        self.locked_candles.add(candle_signature)
-        print(f"🔒 LOCKED: {candle_signature}")
-        print(f"📊 Total locked candles: {len(self.locked_candles)}")
-        
-        # เก็บแค่ 100 แท่งล่าสุด
-        if len(self.locked_candles) > 100:
-            # แปลง set เป็น list เพื่อลบตัวเก่า
-            sorted_candles = sorted(list(self.locked_candles))
-            self.locked_candles = set(sorted_candles[-50:])  # เก็บ 50 ตัวล่าสุด
-            print(f"🧹 Cleaned locks: kept 50 most recent")
+    def _mark_signal_sent_for_signature(self, signature: str):
+        """🔒 บันทึกว่าส่ง signal สำหรับแท่งนี้แล้ว"""
+        try:
+            if not hasattr(self, 'signal_signatures'):
+                self.signal_signatures = set()
+            
+            self.signal_signatures.add(signature)
+            
+            # เก็บแค่ 100 signatures ล่าสุด (ป้องกัน memory leak)
+            if len(self.signal_signatures) > 100:
+                signatures_list = list(self.signal_signatures)
+                self.signal_signatures = set(signatures_list[-50:])
+                print(f"🧹 Cleaned signal signatures: kept 50 recent")
+            
+            print(f"🔒 SIGNAL SIGNATURE LOCKED: {signature}")
+            print(f"📊 Total locked signatures: {len(self.signal_signatures)}")
+            
+        except Exception as e:
+            print(f"❌ Mark signal signature error: {e}")
 
     def clear_all_locks(self):
         """ล้างการล็อกทั้งหมด - สำหรับ debug"""
@@ -335,7 +320,36 @@ class SignalGenerator:
             'reason': reason,
             'signal_id': f"WAIT_{datetime.now().strftime('%H%M%S')}"
         }
-           
+
+    def clear_signal_locks(self):
+        """🗑️ ล้างการล็อก signal ทั้งหมด (สำหรับ debug)"""
+        try:
+            if hasattr(self, 'signal_signatures'):
+                old_count = len(self.signal_signatures)
+                self.signal_signatures.clear()
+                print(f"🗑️ Cleared {old_count} signal signature locks")
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ Clear signal locks error: {e}")
+            return False
+
+    def get_signal_lock_info(self) -> Dict:
+        """📊 ข้อมูลการล็อก signal"""
+        try:
+            if not hasattr(self, 'signal_signatures'):
+                self.signal_signatures = set()
+            
+            return {
+                'total_locked_signatures': len(self.signal_signatures),
+                'recent_signatures': list(self.signal_signatures)[-5:] if self.signal_signatures else [],
+                'max_signature_history': 100,
+                'lock_method': 'candle_timestamp_based'
+            }
+            
+        except Exception as e:
+            return {'error': str(e)}       
     # ==========================================
     # 🔧 UTILITY & VALIDATION METHODS
     # ==========================================

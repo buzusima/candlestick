@@ -211,166 +211,188 @@ class CandlestickAnalyzer:
                 
     def get_current_analysis(self) -> Optional[Dict]:
         """
-        📊 COMPLETE FIXED - ระบบทำงานได้เลย ไม่มีการบล็อก
+        รอแท่งปิดจริง 100% + Lock เข้มงวด
         """
         try:
-            if not hasattr(self, 'analysis_count'):
-                self.analysis_count = 0
-            self.analysis_count += 1
-            
-            print(f"\n=== 📊 ANALYSIS #{self.analysis_count} (COMPLETE FIXED) ===")
-            
             if not self.mt5_connector.is_connected:
                 return None
             
-            # 🔧 FORCE SYMBOL REFRESH
-            print(f"🔄 Force refreshing symbol: {self.symbol}")
-            mt5.symbol_select(self.symbol, True)
-            
-            # 🔧 GET FRESH RATES WITH RETRY
-            rates = None
-            for attempt in range(3):
-                print(f"📊 Attempt {attempt + 1}: Getting fresh rates...")
-                rates = mt5.copy_rates_from_pos(self.symbol, self.timeframe, 0, 5)
-                
-                if rates is not None and len(rates) >= 2:
-                    print(f"✅ Got {len(rates)} rates on attempt {attempt + 1}")
-                    break
-                else:
-                    print(f"❌ Attempt {attempt + 1} failed")
-                    time.sleep(0.5)
-            
+            # ดึงแท่งที่ปิดสมบูรณ์แล้ว 2 แท่ง
+            rates = mt5.copy_rates_from_pos(self.symbol, self.timeframe, 1, 2)
             if rates is None or len(rates) < 2:
-                print(f"❌ Cannot get fresh rates after 3 attempts")
                 return None
             
-            # 🔍 DEBUG: แสดงข้อมูลทุกแท่ง
-            print(f"🔍 ALL RATES DATA:")
-            for i, rate in enumerate(rates):
-                rate_time = datetime.fromtimestamp(int(rate['time']))
-                rate_close = float(rate['close'])
-                rate_high = float(rate['high'])
-                rate_low = float(rate['low'])
-                print(f"   [{i}] {rate_time.strftime('%H:%M:%S')} | Close: {rate_close:.4f} | H: {rate_high:.4f} | L: {rate_low:.4f}")
+            # แท่งที่ปิดสมบูรณ์แล้ว
+            closed_candle = rates[0]     # แท่งที่ปิดล่าสุด
+            reference_candle = rates[1]  # แท่งก่อนหน้า
             
-            # Extract current และ previous candle
-            current_candle = rates[0]
-            previous_candle = rates[1]
+            # ดึง timestamp
+            candle_timestamp = int(closed_candle['time'])
             
-            try:
-                close_0 = float(current_candle['close'])
-                open_0 = float(current_candle['open'])
-                high_0 = float(current_candle['high'])
-                low_0 = float(current_candle['low'])
-                
-                high_1 = float(previous_candle['high'])
-                low_1 = float(previous_candle['low'])
-                close_1 = float(previous_candle['close'])
-                open_1 = float(previous_candle['open'])
-                
-            except Exception as e:
-                print(f"❌ Price extraction error: {e}")
+            # เช็ค duplicate เข้มงวด
+            if not hasattr(self, 'processed_timestamps'):
+                self.processed_timestamps = set()
+            
+            if candle_timestamp in self.processed_timestamps:
+                return None  # แท่งนี้ประมวลผลแล้ว
+            
+            # เช็คว่าแท่งนี้ปิดมานานแค่ไหน
+            candle_time = datetime.fromtimestamp(candle_timestamp)
+            time_since_close = (datetime.now() - candle_time).total_seconds()
+            
+            print(f"CLOSED CANDLE CHECK:")
+            print(f"   Candle time: {candle_time.strftime('%H:%M:%S')}")
+            print(f"   Closed since: {time_since_close:.0f} seconds ago")
+            
+            # ต้องปิดมาแล้วอย่างน้อย 10 วินาที (ให้แน่ใจว่าปิดจริง)
+            if time_since_close < 10:
+                print(f"   Too fresh - wait more")
                 return None
             
-            print(f"💰 EXTRACTED PRICES:")
-            print(f"   Current Close[0]: {close_0:.4f}")
-            print(f"   Previous High[1]: {high_1:.4f}")
-            print(f"   Previous Low[1]:  {low_1:.4f}")
+            # Lock timestamp นี้
+            self.processed_timestamps.add(candle_timestamp)
+            print(f"   LOCKED timestamp: {candle_timestamp}")
             
-            # 🔧 MINIMAL DUPLICATE CHECK - เช็คแค่ว่าไม่ใช่วินาทีเดียวกัน
-            current_second = datetime.now().second
-            if hasattr(self, 'last_analysis_second'):
-                if current_second == self.last_analysis_second:
-                    print(f"🚫 SAME SECOND: {current_second} - Wait 1 second")
-                    return None
+            # เก็บแค่ 20 timestamps ล่าสุด
+            if len(self.processed_timestamps) > 20:
+                timestamps_list = sorted(list(self.processed_timestamps))
+                self.processed_timestamps = set(timestamps_list[-10:])
             
-            self.last_analysis_second = current_second
+            # ดึงราคาจากแท่งที่ปิดแล้ว
+            close_1 = float(closed_candle['close'])      # Close ของแท่งที่ปิดแล้ว
+            high_2 = float(reference_candle['high'])     # High ของแท่งก่อนหน้า
+            low_2 = float(reference_candle['low'])       # Low ของแท่งก่อนหน้า
             
-            # 🎯 ตรวจสอบเงื่อนไข signals - ปรับให้ sensitive ขึ้น
-            tolerance = 0.05  # เพิ่ม tolerance 5 cents
+            print(f"FINAL CLOSED PRICES:")
+            print(f"   Close[1]: {close_1:.4f} (ปิดสมบูรณ์แล้ว)")
+            print(f"   High[2]:  {high_2:.4f}")  
+            print(f"   Low[2]:   {low_2:.4f}")
             
-            is_breakout = close_0 >= (high_1 - tolerance)  # BUY ถ้าใกล้ high
-            is_breakdown = close_0 <= (low_1 + tolerance)   # SELL ถ้าใกล้ low
+            # เช็คเงื่อนไข
+            is_breakout = close_1 > high_2
+            is_breakdown = close_1 < low_2
             
-            print(f"🎯 SIGNAL ANALYSIS (WITH TOLERANCE):")
-            print(f"   BUY Condition:  {close_0:.4f} >= {high_1 - tolerance:.4f} = {is_breakout}")
-            print(f"   SELL Condition: {close_0:.4f} <= {low_1 + tolerance:.4f} = {is_breakdown}")
-            print(f"   Tolerance: ±{tolerance:.2f}")
+            print(f"BREAKOUT CHECK:")
+            print(f"   BUY:  {close_1:.4f} > {high_2:.4f} = {is_breakout}")
+            print(f"   SELL: {close_1:.4f} < {low_2:.4f} = {is_breakdown}")
             
-            if is_breakout:
-                breakout_amount = close_0 - high_1
-                print(f"   🟢 BREAKOUT DETECTED! Amount: +{breakout_amount:.4f}")
-            elif is_breakdown:
-                breakdown_amount = low_1 - close_0
-                print(f"   🔴 BREAKDOWN DETECTED! Amount: -{breakdown_amount:.4f}")
-            else:
-                print(f"   ⏳ NO SIGNAL - Price within range")
-                print(f"      Range: {low_1:.4f} <= {close_0:.4f} <= {high_1:.4f}")
-                range_to_high = high_1 - close_0
-                range_to_low = close_0 - low_1
-                print(f"      Distance to HIGH: {range_to_high:.4f}")
-                print(f"      Distance to LOW: {range_to_low:.4f}")
+            if not (is_breakout or is_breakdown):
+                print(f"   No breakout/breakdown")
+                return None
             
-            # สร้างข้อมูลแท่งเทียนแบบง่าย
-            candle_color = 'green' if close_0 > open_0 else ('red' if close_0 < open_0 else 'doji')
-            candle_range = high_0 - low_0
-            body_size = abs(close_0 - open_0)
-            body_ratio = body_size / candle_range if candle_range > 0 else 0
-            
-            # สร้างผลลัพธ์สุดท้าย
-            unique_signature = f"WORKING_{self.analysis_count}_{close_0:.3f}_{datetime.now().microsecond}"
-            
-            print(f"✅ ANALYSIS READY FOR SIGNAL GENERATION:")
-            print(f"   Signature: {unique_signature}")
-            print(f"   Candle: {candle_color} (Body: {body_ratio:.3f})")
-            print(f"   Ready to send to Signal Generator!")
+            # คำนวณ properties
+            open_1 = float(closed_candle['open'])
+            high_1 = float(closed_candle['high'])
+            low_1 = float(closed_candle['low'])
             
             return {
                 'symbol': self.symbol,
-                'timestamp': datetime.now(),
-                'candle_signature': unique_signature,
-                'analysis_id': self.analysis_count,
+                'timestamp': candle_time,
+                'candle_signature': f"FINAL_{candle_timestamp}",
+                'candle_timestamp': candle_timestamp,
                 
-                # 🎯 ข้อมูลสำหรับ Signal Generator (ตามเงื่อนไขเดิม)
-                'close': close_0,           # Current close for condition check
-                'previous_high': high_1,    # Previous high for BUY condition
-                'previous_low': low_1,      # Previous low for SELL condition
-                'previous_close': close_1,  # Previous close for reference
+                'close': close_1,
+                'previous_high': high_2,
+                'previous_low': low_2,
+                'previous_close': float(reference_candle['close']),
                 
-                # ข้อมูลแท่งปัจจุบันครบ
-                'open': open_0,
-                'high': high_0,
-                'low': low_0,
+                'open': open_1,
+                'high': high_1,
+                'low': low_1,
                 
-                # Signal preview ที่ชัดเจน
                 'breakout_detected': is_breakout,
                 'breakdown_detected': is_breakdown,
-                'breakout_amount': close_0 - high_1 if is_breakout else 0,
-                'breakdown_amount': low_1 - close_0 if is_breakdown else 0,
+                'breakout_amount': close_1 - high_2 if is_breakout else 0,
+                'breakdown_amount': low_2 - close_1 if is_breakdown else 0,
                 
-                # Candle analysis
-                'candle_color': candle_color,
-                'body_ratio': body_ratio,
-                'price_direction': 'higher_close' if close_0 > close_1 else ('lower_close' if close_0 < close_1 else 'same_close'),
-                'pattern_name': f'{candle_color}_candle',
-                'pattern_strength': 0.7 if body_ratio > 0.3 else 0.5,
-                
-                # Volume (simplified - no complex analysis)
-                'volume_available': True,  # Set to True เพื่อไม่ให้ signal generator คิดมาก
-                'volume_factor': 1.2,      # Default good volume
-                'current_volume': 1000,
-                'avg_volume': 800,
-                
-                # Quality metrics
-                'analysis_strength': 0.8,
-                'processing_quality': 'real_time',
-                'method': 'complete_working_fix'
+                'candle_color': 'green' if close_1 > open_1 else 'red',
+                'body_ratio': abs(close_1 - open_1) / (high_1 - low_1) if high_1 > low_1 else 0,
+                'signal_strength': 0.8,
+                'analysis_method': 'strict_closed_candle_only'
             }
             
         except Exception as e:
-            print(f"❌ Analysis error: {e}")
+            print(f"Strict analysis error: {e}")
             return None
-                                                                                                                    
+    
+    def get_current_analysis_alternative(self) -> Optional[Dict]:
+        """
+        🎯 ALTERNATIVE: ใช้แท่งปัจจุบัน vs แท่งที่ปิดแล้ว
+        """
+        try:
+            if not self.mt5_connector.is_connected:
+                return None
+            
+            # ดึง 2 แท่งล่าสุด
+            rates = mt5.copy_rates_from_pos(self.symbol, self.timeframe, 0, 2)
+            if rates is None or len(rates) < 2:
+                return None
+            
+            # แท่งปัจจุบัน [0] vs แท่งที่ปิดล่าสุด [1]
+            current = rates[0]  # กำลังเกิด
+            closed = rates[1]   # ปิดแล้ว
+            
+            # ราคาปัจจุบัน vs level ของแท่งที่ปิด
+            current_close = float(current['close'])  # ราคาล่าสุดของแท่งที่กำลังเกิด
+            ref_high = float(closed['high'])
+            ref_low = float(closed['low'])
+            
+            # สร้าง signature
+            signature = f"M5_CURRENT_{current_close:.2f}_{ref_high:.2f}_{ref_low:.2f}"
+            
+            # เช็ค duplicate
+            if not hasattr(self, 'last_m5_signature'):
+                self.last_m5_signature = ""
+            
+            if signature == self.last_m5_signature:
+                return None
+            
+            print(f"📊 M5 CURRENT vs CLOSED:")
+            print(f"   Current Close: {current_close:.4f} (แท่งกำลังเกิด)")
+            print(f"   Ref High: {ref_high:.4f}")
+            print(f"   Ref Low: {ref_low:.4f}")
+            
+            # เช็คเงื่อนไข with small tolerance
+            tolerance = 0.3  # tolerance เล็ก ๆ
+            is_breakout = current_close >= (ref_high - tolerance)
+            is_breakdown = current_close <= (ref_low + tolerance)
+            
+            print(f"🎯 M5 CONDITIONS (tolerance {tolerance}):")
+            print(f"   BUY:  {current_close:.4f} >= {ref_high - tolerance:.4f} = {is_breakout}")
+            print(f"   SELL: {current_close:.4f} <= {ref_low + tolerance:.4f} = {is_breakdown}")
+            
+            if is_breakout or is_breakdown:
+                # Lock
+                self.last_m5_signature = signature
+                
+                return {
+                    'symbol': self.symbol,
+                    'timestamp': datetime.fromtimestamp(int(current['time'])),
+                    'candle_signature': signature,
+                    
+                    # ข้อมูลหลัก
+                    'close': current_close,
+                    'previous_high': ref_high,
+                    'previous_low': ref_low,
+                    'previous_close': float(closed['close']),
+                    
+                    # เพิ่มเติม
+                    'open': float(current['open']),
+                    'high': float(current['high']), 
+                    'low': float(current['low']),
+                    
+                    'breakout_detected': is_breakout,
+                    'breakdown_detected': is_breakdown,
+                    'tolerance_used': tolerance,
+                    'analysis_method': 'm5_current_vs_closed'
+                }
+            
+            return None  # ยังไม่เข้าเงื่อนไข
+            
+        except Exception as e:
+            print(f"❌ M5 current analysis error: {e}")
+            return None
+                                                                                                                        
     def _create_candle_signature(self, candle: Dict) -> str:
         """
         🔑 สร้างลายเซ็น OHLC - PURE OHLC NO TIME VERSION
@@ -999,6 +1021,36 @@ class CandlestickAnalyzer:
             'samples': 0,
             'source': 'fallback'
         }
+    
+    def reset_timestamp_tracking(self):
+        """🔄 รีเซ็ตการติดตาม timestamp (สำหรับ debug)"""
+        try:
+            self.last_processed_timestamp = 0
+            print(f"🔄 Timestamp tracking reset")
+            return True
+        except Exception as e:
+            print(f"❌ Reset error: {e}")
+            return False
+
+    def get_timestamp_info(self) -> Dict:
+        """📊 ข้อมูลการติดตาม timestamp"""
+        try:
+            last_time = self.last_processed_timestamp
+            if last_time > 0:
+                last_datetime = datetime.fromtimestamp(last_time)
+                time_ago = (datetime.now() - last_datetime).total_seconds()
+            else:
+                last_datetime = None
+                time_ago = 0
+            
+            return {
+                'last_processed_timestamp': last_time,
+                'last_processed_datetime': last_datetime.isoformat() if last_datetime else None,
+                'seconds_since_last': time_ago,
+                'next_expected_in_seconds': max(0, 300 - time_ago)  # M5 = 300 วินาที
+            }
+        except Exception as e:
+            return {'error': str(e)}
     
     # ==========================================
     # 🔍 PATTERN RECOGNITION

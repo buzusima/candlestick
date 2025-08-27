@@ -1,44 +1,53 @@
 """
-🕯️ Pure Candlestick Analyzer (FIXED OHLC)
+🕯️ Pure Candlestick Analyzer (COMPLETE VERSION)
 candlestick_analyzer.py
 
-🔧 FIXED ISSUES:
+🔧 COMPLETELY FIXED:
 ✅ numpy.void object 'get' method error
 ✅ Proper OHLC data extraction from MT5
 ✅ Volume data handling
 ✅ Error handling for missing data
+✅ Real-time candle processing
+✅ Duplicate prevention system
+✅ Memory management & caching
+✅ Pattern recognition algorithms
+✅ Volume confirmation system
 
-🚀 Features:
-✅ OHLC Data Collection
-✅ Candlestick Pattern Recognition
-✅ Volume Analysis (with fallback)
-✅ Body Ratio Calculation
+🚀 Complete Features:
+✅ OHLC Data Collection & Validation
+✅ Advanced Candlestick Pattern Recognition
+✅ Volume Analysis with Fallback
+✅ Body Ratio & Wick Analysis
 ✅ Price Direction Detection
-✅ Basic Pattern Classification
+✅ Pattern Classification System
+✅ Real-time Performance Tracking
+✅ Signature-based Duplicate Prevention
+✅ Persistence Integration
+✅ Comprehensive Error Handling
 """
 
 import MetaTrader5 as mt5
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 import time
+import statistics
+import math
 
 class CandlestickAnalyzer:
     """
-    🕯️ Pure Candlestick Analyzer (FIXED VERSION)
+    🕯️ Pure Candlestick Analyzer (COMPLETE VERSION)
     
-    วิเคราะห์แท่งเทียนปัจจุบันและก่อนหน้า
-    เพื่อหา patterns และ signals ที่เชื่อถือได้
+    วิเคราะห์แท่งเทียนแบบครบถ้วนสมบูรณ์
+    รองรับการวิเคราะห์ real-time และ pattern recognition
     """
     
     def __init__(self, mt5_connector, config: Dict):
         """
-        🔧 เริ่มต้น Candlestick Analyzer - COMPLETELY FIXED
+        🔧 เริ่มต้น Candlestick Analyzer - COMPLETE
         
-        🚀 Fixed Issues:
-        - Invalid time order detection
-        - Proper duplicate prevention
-        - Real-time candle processing
-        - Memory management
+        Args:
+            mt5_connector: MT5 connection object
+            config: การตั้งค่าระบบ
         """
         self.mt5_connector = mt5_connector
         self.config = config
@@ -48,1143 +57,1720 @@ class CandlestickAnalyzer:
         self.timeframe = mt5.TIMEFRAME_M1
         
         # การตั้งค่า analysis parameters
-        self.min_candles_required = 3  # ลดจาก 20 เป็น 3 (ใช้แค่ 3 แท่ง)
+        self.min_candles_required = 3  # ขั้นต่ำสำหรับ analysis
+        self.max_candles_lookback = 20  # สูงสุดที่จะดูย้อนหลัง
         self.volume_lookback_periods = 10
         
         # Pattern recognition settings
-        self.doji_threshold = 0.05
-        self.strong_body_threshold = 0.6
+        self.doji_threshold = 0.05  # 5% สำหรับ doji detection
+        self.strong_body_threshold = 0.6  # 60% สำหรับ strong candle
+        self.hammer_wick_ratio = 2.0  # อัตราส่วน wick สำหรับ hammer
+        self.shooting_star_ratio = 2.0  # อัตราส่วนสำหรับ shooting star
+        
+        # Volume analysis settings
+        self.volume_spike_threshold = 1.5  # 150% ของ average volume
+        self.volume_confirmation_enabled = config.get("volume", {}).get("enabled", True)
+        self.volume_fallback_enabled = True  # ใช้ fallback เมื่อไม่มี volume
         
         # 🔧 CACHE MANAGEMENT - ปรับให้เหมาะ real-time
         self.last_analysis_time = datetime.min
         self.last_analyzed_candle_time = datetime.min
-        self.cache_duration_seconds = 2   # ลดเหลือ 5 วินาที เพื่อ real-time
+        self.cache_duration_seconds = 5   # Cache 5 วินาที
         self.cached_analysis = None
         
         # 🔧 VOLUME TRACKING
         self.volume_available = False
         self.volume_history = []
         self.max_volume_history = 20
+        self.avg_volume = 0.0
         
         # 🆕 STRICT SIGNATURE TRACKING
         self.processed_signatures = set()
-        self.max_signature_history = 500  # ปรับเป็น 500 เพื่อประสิทธิภาพ
+        self.max_signature_history = 500  # เก็บ 500 signatures
         
         # 🆕 CANDLE STATE TRACKING  
         self.last_candle_signature = None
         self.last_processed_candle_time = datetime.min
-        self.minimum_time_gap_seconds = 10  # 🔧 ใหม่: ต้องห่างกัน 30 วินาทีขั้นต่ำ
+        self.minimum_time_gap_seconds = 30  # ห่างกัน 30 วินาทีขั้นต่ำ
         
         # 🆕 PERFORMANCE COUNTERS
         self.analysis_count = 0
         self.duplicate_blocks = 0
         self.successful_analysis = 0
-        self.time_order_errors = 0        # 🆕 นับ time order errors
-        self.invalid_data_errors = 0      # 🆕 นับ invalid data errors
+        self.time_order_errors = 0
+        self.invalid_data_errors = 0
         
         # 🆕 DATA VALIDATION FLAGS
-        self.strict_time_checking = True   # เปิดการเช็คเวลาอย่างเข้มงวด
-        self.allow_same_minute_candles = False  # ไม่อนุญาตแท่งเดียวกันในนาทีเดียวกัน
+        self.strict_time_checking = True
+        self.allow_same_minute_candles = False
         
         # 🔧 PERSISTENCE INTEGRATION
         self.persistence_manager = None
         
         # 🆕 REAL-TIME PROCESSING FLAGS
-        self.real_time_mode = True         # โหมด real-time
-        self.force_sequential_processing = True  # บังคับประมวลผลตามลำดับเวลา
-           
-        # 💾 NEW: State Management สำหรับเก็บ Reference Candle
-        self.reference_candle = None           # เก็บข้อมูลแท่งอ้างอิง
-        self.reference_timestamp = 0           # timestamp ของแท่งอ้างอิง  
-        self.waiting_for_new_candle = False    # กำลังรอแท่งใหม่หรือไม่
-        self.last_checked_timestamp = 0 
+        self.real_time_mode = True
+        self.force_sequential_processing = True
         
-        self.price_history = []        # เก็บราคาย้อนหลัง
-        self.high_low_levels = {}      # เก็บ high/low ของแต่ละนาที
-        self.last_minute_processed = ""  # นาทีล่าสุดที่ประมวลผล
-        self.current_minute_data = {    # ข้อมูลนาทีปัจจุบัน
-            'high': 0,
-            'low': 999999,
-            'open': 0,
-            'close': 0,
-            'tick_count': 0
-        }
-
-        # print(f"🕯️ COMPLETELY FIXED Candlestick Analyzer for {self.symbol}")
-        # print(f"   Real-time mode: {self.real_time_mode}")
-        # print(f"   Cache duration: {self.cache_duration_seconds}s")
-        # print(f"   Min time gap: {self.minimum_time_gap_seconds}s")
-        # print(f"   Strict time checking: {self.strict_time_checking}")
-        # print(f"   Sequential processing: {self.force_sequential_processing}")
-        # print(f"   Max signatures: {self.max_signature_history}")
-        # print(f"   Duplicate prevention: ULTRA STRICT")
-        # print(f"   🎯 Ready for breakout/breakdown detection")
-
-                    
-
+        # Pattern tracking
+        self.pattern_history = []
+        self.pattern_success_rates = {}
+        
+        print(f"🕯️ Candlestick Analyzer initialized (COMPLETE) for {self.symbol}")
+        print(f"   Timeframe: M1")
+        print(f"   Min candles: {self.min_candles_required}")
+        print(f"   Volume enabled: {self.volume_confirmation_enabled}")
+        print(f"   Cache duration: {self.cache_duration_seconds}s")
+        print(f"   Real-time mode: {self.real_time_mode}")
+    
+    # ==========================================
+    # 🕯️ MAIN ANALYSIS METHODS - COMPLETE
+    # ==========================================
+    
     def get_current_analysis(self) -> Optional[Dict]:
         """
-        🎯 SIMPLE METHOD: สร้าง OHLC เอง จาก tick ไม่พึ่ง rates
+        🕯️ วิเคราะห์แท่งเทียนปัจจุบัน - COMPLETE VERSION (MAIN METHOD)
         
-        ✅ Logic เรียบง่าย:
-        1. เก็บ tick ปัจจุบัน
-        2. สร้าง OHLC ของนาทีปัจจุบัน
-        3. เมื่อนาทีใหม่ → เทียบกับนาทีก่อน
-        4. ถ้าตรงเงื่อนไข → ส่ง Signal
+        Returns:
+            Dict: ผลการวิเคราะห์แบบครบถ้วน หรือ None ถ้าไม่สามารถวิเคราะห์
         """
         try:
-            if not self.mt5_connector.is_connected:
+            self.analysis_count += 1
+            
+            print(f"\n🕯️ === CANDLESTICK ANALYSIS #{self.analysis_count} ===")
+            
+            # 1. ตรวจสอบการเชื่อมต่อและความพร้อม
+            if not self._validate_connection():
                 return None
-
-            # 1. ดึงราคาปัจจุบัน
-            tick = mt5.symbol_info_tick(self.symbol)
-            if tick is None:
-                print("❌ Cannot get current tick")
+            
+            # 2. ตรวจสอบ cache
+            if self._is_cache_valid():
+                print(f"📋 Using cached analysis (age: {(datetime.now() - self.last_analysis_time).seconds}s)")
+                return self.cached_analysis
+            
+            # 3. ดึงข้อมูลแท่งเทียน
+            candle_data = self._fetch_candlestick_data()
+            if not candle_data:
+                print(f"❌ Failed to fetch candlestick data")
+                self.invalid_data_errors += 1
                 return None
             
-            current_price = float(tick.bid)
-            tick_time = datetime.fromtimestamp(tick.time)
-            current_minute = tick_time.strftime('%H:%M')
+            # 4. ตรวจสอบและทำความสะอาดข้อมูล
+            cleaned_data = self._validate_and_clean_data(candle_data)
+            if not cleaned_data:
+                print(f"❌ Invalid data after cleaning")
+                self.invalid_data_errors += 1
+                return None
             
-            print(f"\n🎯 === SIMPLE TICK-BASED ANALYSIS ===")
-            print(f"🕐 Current time: {tick_time.strftime('%H:%M:%S')}")
-            print(f"💰 Current price: ${current_price:.4f}")
-            print(f"📅 Current minute: {current_minute}")
+            # 5. ตรวจสอบ duplicate processing
+            current_signature = self._generate_candle_signature(cleaned_data[0])
+            if self._is_already_processed(current_signature):
+                print(f"🚫 Duplicate processing blocked: {current_signature}")
+                self.duplicate_blocks += 1
+                return self.cached_analysis
             
-            # 2. อัพเดท OHLC ของนาทีปัจจุบัน
-            if current_minute != self.last_minute_processed:
-                # 🆕 นาทีใหม่ - บันทึกนาทีก่อนแล้วเริ่มใหม่
+            # 6. วิเคราะห์แท่งเทียนแบบครบถ้วน
+            analysis_result = self._perform_complete_analysis(cleaned_data)
+            
+            if analysis_result:
+                # 7. บันทึกผลการวิเคราะห์
+                self._record_successful_analysis(current_signature, analysis_result)
+                self.successful_analysis += 1
                 
-                if self.last_minute_processed:  # มีข้อมูลนาทีก่อน
-                    # บันทึกข้อมูลนาทีที่ผ่านมา
-                    self.high_low_levels[self.last_minute_processed] = {
-                        'high': self.current_minute_data['high'],
-                        'low': self.current_minute_data['low'],
-                        'open': self.current_minute_data['open'], 
-                        'close': self.current_minute_data['close'],
-                        'tick_count': self.current_minute_data['tick_count']
+                print(f"✅ Analysis completed successfully")
+                print(f"   Pattern: {analysis_result.get('pattern_name')}")
+                print(f"   Color: {analysis_result.get('candle_color')}")
+                print(f"   Strength: {analysis_result.get('pattern_strength'):.3f}")
+                print(f"   Body ratio: {analysis_result.get('body_ratio'):.3f}")
+                
+                return analysis_result
+            else:
+                print(f"❌ Analysis failed")
+                return None
+                
+        except Exception as e:
+            print(f"❌ Candlestick analysis error: {e}")
+            self.invalid_data_errors += 1
+            return self._get_fallback_analysis()
+    
+    def _fetch_candlestick_data(self) -> Optional[List[Dict]]:
+        """
+        📊 ดึงข้อมูลแท่งเทียน - COMPLETE WITH ERROR HANDLING
+        
+        Returns:
+            List[Dict]: รายการข้อมูลแท่งเทียน หรือ None
+        """
+        try:
+            print(f"📊 Fetching candlestick data for {self.symbol}")
+            
+            # ดึงข้อมูลแท่งเทียน
+            candles = mt5.copy_rates_from_pos(
+                self.symbol, 
+                self.timeframe, 
+                0, 
+                self.max_candles_lookback
+            )
+            
+            if candles is None or len(candles) == 0:
+                print(f"❌ No candlestick data received")
+                return None
+            
+            if len(candles) < self.min_candles_required:
+                print(f"❌ Insufficient candles: {len(candles)} < {self.min_candles_required}")
+                return None
+            
+            print(f"✅ Fetched {len(candles)} candles")
+            
+            # แปลงข้อมูล MT5 เป็น dictionary format
+            converted_candles = []
+            
+            for i, candle in enumerate(candles):
+                try:
+                    # 🔧 FIXED: แปลง numpy data เป็น Python native types
+                    candle_dict = {
+                        'time': int(candle[0]),  # timestamp
+                        'open': float(candle[1]),
+                        'high': float(candle[2]),
+                        'low': float(candle[3]),
+                        'close': float(candle[4]),
+                        'tick_volume': int(candle[5]) if len(candle) > 5 else 0,
+                        'spread': int(candle[6]) if len(candle) > 6 else 0,
+                        'real_volume': int(candle[7]) if len(candle) > 7 else 0,
+                        'index': i,
+                        'datetime': datetime.fromtimestamp(int(candle[0]))
                     }
                     
-                    print(f"💾 SAVED PREVIOUS MINUTE: {self.last_minute_processed}")
-                    print(f"   📈 High: ${self.current_minute_data['high']:.4f}")
-                    print(f"   📉 Low:  ${self.current_minute_data['low']:.4f}")
-                    print(f"   📊 Close: ${self.current_minute_data['close']:.4f}")
-                    print(f"   🎯 Ticks: {self.current_minute_data['tick_count']}")
-                
-                # เริ่มนาทีใหม่
-                self.current_minute_data = {
-                    'high': current_price,
-                    'low': current_price,
-                    'open': current_price,
-                    'close': current_price,
-                    'tick_count': 1
-                }
-                
-                print(f"🆕 STARTED NEW MINUTE: {current_minute}")
-                print(f"   Opening price: ${current_price:.4f}")
-                
-                # ถ้ามีข้อมูลนาทีก่อน → เทียบกัน
-                if self.last_minute_processed in self.high_low_levels:
-                    return self._check_breakout_conditions(current_minute)
-                
-                self.last_minute_processed = current_minute
+                    # ตรวจสอบความถูกต้องของ OHLC
+                    if self._validate_ohlc_data(candle_dict):
+                        converted_candles.append(candle_dict)
+                    else:
+                        print(f"⚠️ Invalid OHLC data at index {i}, skipping")
+                        
+                except Exception as e:
+                    print(f"❌ Error converting candle {i}: {e}")
+                    continue
+            
+            if len(converted_candles) < self.min_candles_required:
+                print(f"❌ Insufficient valid candles after conversion: {len(converted_candles)}")
                 return None
-                
-            else:
-                # 🔄 นาทีเดิม - อัพเดท OHLC
-                self.current_minute_data['high'] = max(self.current_minute_data['high'], current_price)
-                self.current_minute_data['low'] = min(self.current_minute_data['low'], current_price)
-                self.current_minute_data['close'] = current_price
-                self.current_minute_data['tick_count'] += 1
-                
-                # แสดงข้อมูลนาทีปัจจุบัน
-                print(f"🔄 UPDATING MINUTE: {current_minute}")
-                print(f"   📈 High: ${self.current_minute_data['high']:.4f}")
-                print(f"   📉 Low:  ${self.current_minute_data['low']:.4f}")
-                print(f"   📊 Current: ${current_price:.4f}")
-                print(f"   🎯 Ticks: {self.current_minute_data['tick_count']}")
-                
-                return None  # ยังไม่เสร็จ
+            
+            # เรียงตามเวลา (เก่าไปใหม่)
+            converted_candles.sort(key=lambda x: x['time'])
+            
+            print(f"✅ Converted {len(converted_candles)} valid candles")
+            
+            # อัพเดท volume tracking
+            self._update_volume_tracking(converted_candles)
+            
+            return converted_candles
             
         except Exception as e:
-            print(f"❌ Simple analysis error: {e}")
+            print(f"❌ Fetch candlestick data error: {e}")
             return None
-
-    def _check_breakout_conditions(self, current_minute: str) -> Optional[Dict]:
+    
+    def _validate_and_clean_data(self, candles: List[Dict]) -> Optional[List[Dict]]:
         """
-        🎯 เช็คเงื่อนไข Breakout เมื่อมีข้อมูลครบ
-        """
-        try:
-            # ดึงข้อมูลนาทีก่อนหน้า
-            prev_minute_data = self.high_low_levels[self.last_minute_processed]
-            
-            # ราคาปิดของนาทีก่อน (Close จริง)
-            prev_close = prev_minute_data['close']
-            prev_high = prev_minute_data['high'] 
-            prev_low = prev_minute_data['low']
-            
-            # ราคาเปิดของนาทีปัจจุบัน
-            current_open = self.current_minute_data['open']
-            
-            print(f"🔥 === BREAKOUT CHECK ===")
-            print(f"📊 PREVIOUS MINUTE ({self.last_minute_processed}):")
-            print(f"   📈 High: ${prev_high:.4f}")
-            print(f"   📉 Low:  ${prev_low:.4f}")
-            print(f"   📊 Close: ${prev_close:.4f}")
-            print(f"")
-            print(f"📊 NEW MINUTE ({current_minute}):")
-            print(f"   📊 Open: ${current_open:.4f}")
-            print(f"")
-            print(f"🔥 COMPARISON:")
-            print(f"   New Open: ${current_open:.4f}")
-            print(f"   vs Previous High: ${prev_high:.4f}")
-            print(f"   vs Previous Low:  ${prev_low:.4f}")
-            
-            # เช็คเงื่อนไข Gap
-            tolerance = 0.01
-            is_gap_up = current_open > (prev_high + tolerance)
-            is_gap_down = current_open < (prev_low - tolerance)
-            
-            print(f"")
-            print(f"🎯 GAP CONDITIONS:")
-            print(f"   🟢 BUY (Gap Up):   ${current_open:.4f} > ${prev_high + tolerance:.4f} = {is_gap_up}")
-            print(f"   🔴 SELL (Gap Down): ${current_open:.4f} < ${prev_low - tolerance:.4f} = {is_gap_down}")
-            
-            if not (is_gap_up or is_gap_down):
-                print("⏳ No gap detected - normal continuation")
-                return None
-            
-            # สร้าง signature
-            signature = f"GAP_{current_minute.replace(':', '')}_{current_open:.1f}"
-            
-            # เช็ค duplicate
-            if hasattr(self, 'processed_signatures') and signature in self.processed_signatures:
-                print(f"🚫 DUPLICATE GAP BLOCKED: {signature}")
-                return None
-            
-            # Lock
-            if not hasattr(self, 'processed_signatures'):
-                self.processed_signatures = set()
-            self.processed_signatures.add(signature)
-            
-            # คำนวณความแรง
-            if is_gap_up:
-                signal_type = 'BUY'
-                amount = current_open - prev_high
-            else:
-                signal_type = 'SELL'
-                amount = prev_low - current_open
-            
-            strength = min(0.8 + (amount / 2.0), 1.0)
-            
-            print(f"")
-            print(f"🎉 GAP SIGNAL CONFIRMED:")
-            print(f"   🎯 Type: {signal_type}")
-            print(f"   💰 Gap Amount: {amount:.4f}")
-            print(f"   💪 Strength: {strength:.3f}")
-            print(f"   🔒 Signature: {signature}")
-            print("=" * 60)
-            
-            # อัพเดท tracking
-            self.last_minute_processed = current_minute
-            
-            return {
-                'symbol': self.symbol,
-                'timestamp': datetime.now(),
-                'candle_signature': signature,
-                'candle_timestamp': int(time.time()),
-                
-                'close': current_open,           # ใช้ Open ของนาทีใหม่
-                'previous_high': prev_high,
-                'previous_low': prev_low,
-                'previous_close': prev_close,
-                
-                'open': current_open,
-                'high': current_open,  # ยังไม่รู้ high ของนาทีใหม่
-                'low': current_open,   # ยังไม่รู้ low ของนาทีใหม่
-                
-                'breakout_detected': is_gap_up,
-                'breakdown_detected': is_gap_down,
-                'breakout_amount': amount if is_gap_up else 0,
-                'breakdown_amount': amount if is_gap_down else 0,
-                
-                'candle_color': 'green' if is_gap_up else 'red',
-                'body_ratio': 0.8,  # กำหนดค่าคงที่
-                'signal_strength': strength,
-                'analysis_method': 'simple_tick_based_gap_detection'
-            }
-            
-        except Exception as e:
-            print(f"❌ Breakout check error: {e}")
-            return None
-        
-    def get_reference_info(self) -> Dict:
-        """📊 ข้อมูล Reference Candle ปัจจุบัน"""
-        if self.reference_candle:
-            return {
-                'has_reference': True,
-                'reference_time': self.reference_candle['time'].strftime('%H:%M:%S'),
-                'reference_high': self.reference_candle['high'],
-                'reference_low': self.reference_candle['low'],
-                'waiting_for_new': self.waiting_for_new_candle,
-                'last_checked': self.last_checked_timestamp
-            }
-        else:
-            return {'has_reference': False}
-
-    def reset_reference_state(self):
-        """🔄 รีเซ็ต Reference State (สำหรับ debug)"""
-        self.reference_candle = None
-        self.reference_timestamp = 0
-        self.waiting_for_new_candle = False
-        self.last_checked_timestamp = 0
-        print("🔄 Reference state reset")
-                                                                                                                                            
-    def _is_signature_processed(self, signature: str) -> bool:
-        """
-        🔒 STRICT: เช็คว่าแท่งนี้ประมวลผลแล้วหรือยัง
-        ถ้าแล้ว = บล็อกตลอดไป (จนกว่าจะรีสตาร์ทระบบ)
-        """
-        try:
-            is_processed = signature in self.processed_signatures
-            
-            if is_processed:
-                print(f"🚫 PERMANENTLY BLOCKED: แท่งนี้ประมวลผลแล้ว")
-                return True
-            else:
-                print(f"✅ NEW CANDLE: อนุญาตให้ประมวลผล")
-                return False
-                
-        except Exception as e:
-            print(f"Signature check error: {e}")
-            return False
-
-    def _mark_signature_processed(self, signature: str):
-        """
-        🔒 FIXED: บันทึกแท่งที่ประมวลผลแล้ว - ป้องกันซ้ำอย่างเข้มงวด
+        🧹 ตรวจสอบและทำความสะอาดข้อมูล - COMPLETE
         
         Args:
-            signature: ลายเซ็นแท่งเทียน
-        """
-        try:
-            if not hasattr(self, 'processed_signatures'):
-                self.processed_signatures = set()
-            
-            # เพิ่มลายเซ็นใหม่
-            self.processed_signatures.add(signature)
-            
-            # 🔧 CLEANUP: จำกัดจำนวนเพื่อป้องกัน memory leak
-            if len(self.processed_signatures) > 1000:
-                # เก็บแค่ 800 ตัวล่าสุด
-                signatures_list = list(self.processed_signatures)
-                # เรียงตาม timestamp (ถ้ามี)
-                try:
-                    signatures_list.sort(key=lambda x: self._extract_timestamp_from_signature(x))
-                    # เก็บ 800 ตัวล่าสุด
-                    self.processed_signatures = set(signatures_list[-800:])
-                    print(f"🧹 Cleaned signature history: kept 800 most recent")
-                except:
-                    # ถ้าเรียงไม่ได้ ลบแบบสุ่ม
-                    self.processed_signatures = set(signatures_list[-800:])
-            
-            print(f"🔒 PROCESSED: {signature}")
-            print(f"📊 Total signatures: {len(self.processed_signatures)}")
-            
-            # 🆕 บันทึกลง persistence (ถ้ามี)
-            if hasattr(self, 'persistence_manager') and self.persistence_manager:
-                self.persistence_manager.save_processed_signatures(self.processed_signatures)
-                
-        except Exception as e:
-            print(f"❌ Mark signature error: {e}")
-
-    def _extract_timestamp_from_signature(self, signature: str) -> float:
-        """
-        🔧 ดึง timestamp จากลายเซ็น - IMPROVED
-        
-        Args:
-            signature: ลายเซ็นในรูปแบบ "CANDLE_timestamp_..."
+            candles: รายการข้อมูลแท่งเทียน
             
         Returns:
-            float: timestamp หรือ 0 ถ้าไม่พบ
+            List[Dict]: ข้อมูลที่ทำความสะอาดแล้ว หรือ None
         """
         try:
-            # ลายเซ็นรูปแบบ "CANDLE_1756313664_3377.75_..."
-            parts = signature.split('_')
-            if len(parts) >= 2 and parts[0] == 'CANDLE':
-                return float(parts[1])
+            if not candles or len(candles) < self.min_candles_required:
+                return None
             
-            # ลายเซ็นรูปแบบเก่า "CORRECT_timestamp_..."  
-            elif len(parts) >= 2 and parts[0] == 'CORRECT':
-                return float(parts[1])
+            cleaned_candles = []
             
-            # ถ้าไม่ตรงรูปแบบ ใช้ current time
-            return datetime.now().timestamp()
+            for i, candle in enumerate(candles):
+                try:
+                    # ตรวจสอบข้อมูลพื้นฐาน
+                    if not self._validate_basic_candle_data(candle):
+                        print(f"⚠️ Invalid basic data at index {i}")
+                        continue
+                    
+                    # ตรวจสอบเวลา
+                    if self.strict_time_checking and i > 0:
+                        prev_time = cleaned_candles[-1]['time'] if cleaned_candles else 0
+                        current_time = candle['time']
+                        
+                        if current_time <= prev_time:
+                            print(f"⚠️ Time order violation at index {i}: {current_time} <= {prev_time}")
+                            self.time_order_errors += 1
+                            continue
+                    
+                    # เพิ่มข้อมูลเสริม
+                    enhanced_candle = self._enhance_candle_data(candle)
+                    cleaned_candles.append(enhanced_candle)
+                    
+                except Exception as e:
+                    print(f"❌ Error cleaning candle {i}: {e}")
+                    continue
             
-        except (ValueError, IndexError):
-            return datetime.now().timestamp()
+            if len(cleaned_candles) < self.min_candles_required:
+                print(f"❌ Insufficient cleaned candles: {len(cleaned_candles)}")
+                return None
             
-
-    def _analyze_candlestick(self, current: Dict, previous: Dict) -> Dict:
+            print(f"🧹 Cleaned data: {len(cleaned_candles)} valid candles")
+            return cleaned_candles
+            
+        except Exception as e:
+            print(f"❌ Data cleaning error: {e}")
+            return None
+    
+    def _perform_complete_analysis(self, candles: List[Dict]) -> Optional[Dict]:
         """
-        🕯️ วิเคราะห์แท่งเทียน - IMPROVED WITH FIXED DATA
+        🔍 ทำการวิเคราะห์แบบครบถ้วน - COMPLETE ANALYSIS ENGINE
+        
+        Args:
+            candles: ข้อมูลแท่งเทียนที่ทำความสะอาดแล้ว
+            
+        Returns:
+            Dict: ผลการวิเคราะห์แบบครบถ้วน
         """
         try:
-            # 🔧 FIXED: ใช้ข้อมูลที่ถูกต้อง
-            o, h, l, c = current['open'], current['high'], current['low'], current['close']
-            prev_close = previous['close']
-            prev_open = previous['open']
-            prev_high = previous['high']
-            prev_low = previous['low']
+            current_candle = candles[-1]  # แท่งล่าสุด
+            previous_candle = candles[-2] if len(candles) >= 2 else None
             
-            print(f"🕯️ === CANDLESTICK ANALYSIS (FIXED) ===")
-            print(f"   Current OHLC: {o:.4f}/{h:.4f}/{l:.4f}/{c:.4f}")
-            print(f"   Previous OHLC: {prev_open:.4f}/{prev_high:.4f}/{prev_low:.4f}/{prev_close:.4f}")
+            print(f"🔍 Performing complete analysis...")
+            print(f"   Current candle time: {current_candle['datetime'].strftime('%H:%M:%S')}")
+            print(f"   OHLC: {current_candle['open']:.4f}/{current_candle['high']:.4f}/{current_candle['low']:.4f}/{current_candle['close']:.4f}")
+            
+            # 1. การวิเคราะห์พื้นฐาน
+            basic_analysis = self._analyze_basic_candle_properties(current_candle)
+            
+            # 2. การเปรียบเทียบกับแท่งก่อนหน้า
+            comparison_analysis = self._analyze_candle_comparison(current_candle, previous_candle) if previous_candle else {}
+            
+            # 3. การจดจำ pattern
+            pattern_analysis = self._identify_candlestick_patterns(candles)
+            
+            # 4. การวิเคราะห์ volume
+            volume_analysis = self._analyze_volume_confirmation(candles)
+            
+            # 5. การประเมิน market context
+            context_analysis = self._analyze_market_context(candles)
+            
+            # 6. การคำนวณความแรงของ signal
+            signal_strength = self._calculate_analysis_strength(
+                basic_analysis, comparison_analysis, pattern_analysis, volume_analysis
+            )
+            
+            # รวมผลการวิเคราะห์ทั้งหมด
+            complete_analysis = {
+                # Basic properties
+                'timestamp': current_candle['time'],
+                'datetime': current_candle['datetime'],
+                'open': current_candle['open'],
+                'high': current_candle['high'],
+                'low': current_candle['low'],
+                'close': current_candle['close'],
+                'volume': current_candle.get('real_volume', 0),
+                
+                # Basic analysis
+                **basic_analysis,
+                
+                # Comparison analysis
+                **comparison_analysis,
+                
+                # Pattern analysis
+                **pattern_analysis,
+                
+                # Volume analysis
+                **volume_analysis,
+                
+                # Context analysis
+                **context_analysis,
+                
+                # Signal strength
+                'analysis_strength': signal_strength,
+                'analysis_quality': self._calculate_analysis_quality(candles),
+                
+                # Metadata
+                'candles_analyzed': len(candles),
+                'analysis_timestamp': datetime.now(),
+                'analyzer_version': '2.0.0'
+            }
+            
+            # Cache ผลการวิเคราะห์
+            self.cached_analysis = complete_analysis
+            self.last_analysis_time = datetime.now()
+            self.last_analyzed_candle_time = current_candle['datetime']
+            
+            return complete_analysis
+            
+        except Exception as e:
+            print(f"❌ Complete analysis error: {e}")
+            return None
+    
+    # ==========================================
+    # 🔍 DETAILED ANALYSIS METHODS - COMPLETE
+    # ==========================================
+    
+    def _analyze_basic_candle_properties(self, candle: Dict) -> Dict:
+        """
+        🔍 วิเคราะห์คุณสมบัติพื้นฐานของแท่งเทียน - COMPLETE
+        
+        Args:
+            candle: ข้อมูลแท่งเทียน
+            
+        Returns:
+            Dict: การวิเคราะห์คุณสมบัติพื้นฐาน
+        """
+        try:
+            o, h, l, c = candle['open'], candle['high'], candle['low'], candle['close']
             
             # คำนวณขนาดต่างๆ
             candle_range = h - l
             body_size = abs(c - o)
+            upper_shadow = h - max(o, c)
+            lower_shadow = min(o, c) - l
             
             # ป้องกัน division by zero
-            body_ratio = body_size / candle_range if candle_range > 0.0001 else 0
+            range_threshold = 0.0001
+            if candle_range < range_threshold:
+                candle_range = range_threshold
+            
+            # คำนวณอัตราส่วน
+            body_ratio = body_size / candle_range
+            upper_shadow_ratio = upper_shadow / candle_range
+            lower_shadow_ratio = lower_shadow / candle_range
             
             # กำหนดสีแท่งเทียน
-            price_threshold = 0.0001  # threshold สำหรับทองคำ
-            
+            price_threshold = 0.0001
             if c > o + price_threshold:
                 candle_color = 'green'  # bullish
             elif c < o - price_threshold:
                 candle_color = 'red'    # bearish
             else:
-                candle_color = 'doji'   # เกือบเท่ากัน
+                candle_color = 'doji'   # neutral
             
-            # ทิศทางราคาเทียบกับแท่งก่อนหน้า
-            price_change = c - prev_close
-            if abs(price_change) < price_threshold:
-                price_direction = 'same_close'
-            elif price_change > 0:
+            # ประเภทของ body
+            if body_ratio >= self.strong_body_threshold:
+                body_type = 'strong'
+            elif body_ratio >= 0.3:
+                body_type = 'medium'
+            elif body_ratio <= self.doji_threshold:
+                body_type = 'doji'
+            else:
+                body_type = 'weak'
+            
+            # ประเภทของ shadow
+            if upper_shadow_ratio >= 0.6:
+                shadow_type = 'upper_heavy'
+            elif lower_shadow_ratio >= 0.6:
+                shadow_type = 'lower_heavy'
+            elif upper_shadow_ratio >= 0.3 and lower_shadow_ratio >= 0.3:
+                shadow_type = 'both_sides'
+            else:
+                shadow_type = 'normal'
+            
+            return {
+                'candle_color': candle_color,
+                'body_type': body_type,
+                'shadow_type': shadow_type,
+                'candle_range': round(candle_range, 5),
+                'body_size': round(body_size, 5),
+                'body_ratio': round(body_ratio, 4),
+                'upper_shadow': round(upper_shadow, 5),
+                'lower_shadow': round(lower_shadow, 5),
+                'upper_shadow_ratio': round(upper_shadow_ratio, 4),
+                'lower_shadow_ratio': round(lower_shadow_ratio, 4),
+                'is_doji': body_ratio <= self.doji_threshold,
+                'is_strong_body': body_ratio >= self.strong_body_threshold
+            }
+            
+        except Exception as e:
+            print(f"❌ Basic properties analysis error: {e}")
+            return {
+                'candle_color': 'unknown',
+                'body_type': 'unknown',
+                'shadow_type': 'unknown',
+                'body_ratio': 0.0,
+                'is_doji': False,
+                'is_strong_body': False
+            }
+    
+    def _analyze_candle_comparison(self, current: Dict, previous: Dict) -> Dict:
+        """
+        📊 เปรียบเทียบแท่งเทียนปัจจุบันกับแท่งก่อนหน้า - COMPLETE
+        
+        Args:
+            current: แท่งเทียนปัจจุบัน
+            previous: แท่งเทียนก่อนหน้า
+            
+        Returns:
+            Dict: ผลการเปรียบเทียบ
+        """
+        try:
+            if not previous:
+                return {'comparison_available': False}
+            
+            curr_c = current['close']
+            curr_o = current['open']
+            curr_h = current['high']
+            curr_l = current['low']
+            
+            prev_c = previous['close']
+            prev_o = previous['open']
+            prev_h = previous['high']
+            prev_l = previous['low']
+            
+            # เปรียบเทียบราคา
+            price_change = curr_c - prev_c
+            price_change_percent = (price_change / prev_c * 100) if prev_c != 0 else 0
+            
+            # เปรียบเทียบ range
+            curr_range = curr_h - curr_l
+            prev_range = prev_h - prev_l
+            range_change_percent = ((curr_range - prev_range) / prev_range * 100) if prev_range != 0 else 0
+            
+            # ความสัมพันธ์ตำแหน่ง
+            price_threshold = 0.0001
+            
+            # ทิศทางราคาปิด
+            if curr_c > prev_c + price_threshold:
                 price_direction = 'higher_close'
-            else:
+            elif curr_c < prev_c - price_threshold:
                 price_direction = 'lower_close'
+            else:
+                price_direction = 'same_close'
             
-            # คำนวณ wicks
-            if candle_color == 'green':
-                upper_wick = h - c
-                lower_wick = o - l
-            elif candle_color == 'red':
-                upper_wick = h - o
-                lower_wick = c - l
-            else:  # doji
-                upper_wick = h - max(o, c)
-                lower_wick = min(o, c) - l
+            # Gap detection
+            gap_up = curr_o > prev_h + price_threshold
+            gap_down = curr_o < prev_l - price_threshold
+            gap_type = 'up' if gap_up else 'down' if gap_down else 'none'
             
-            # คำนวณ wick ratios
-            upper_wick_ratio = upper_wick / candle_range if candle_range > 0 else 0
-            lower_wick_ratio = lower_wick / candle_range if candle_range > 0 else 0
+            # ความสัมพันธ์ high/low
+            higher_high = curr_h > prev_h + price_threshold
+            lower_low = curr_l < prev_l - price_threshold
+            higher_low = curr_l > prev_l + price_threshold
+            lower_high = curr_h < prev_h - price_threshold
             
-            # Pattern recognition
-            pattern_info = self._recognize_advanced_patterns({
-                'color': candle_color,
-                'body_ratio': body_ratio,
-                'upper_wick': upper_wick,
-                'lower_wick': lower_wick,
-                'upper_wick_ratio': upper_wick_ratio,
-                'lower_wick_ratio': lower_wick_ratio,
-                'candle_range': candle_range,
-                'body_size': body_size,
-                'price_change': price_change
-            })
+            # Pattern relationship
+            if higher_high and higher_low:
+                trend_direction = 'bullish'
+            elif lower_high and lower_low:
+                trend_direction = 'bearish'
+            else:
+                trend_direction = 'sideways'
             
-            analysis_result = {
-                'color': candle_color,
-                'body_ratio': round(body_ratio, 4),
+            return {
+                'comparison_available': True,
+                'price_change': round(price_change, 5),
+                'price_change_percent': round(price_change_percent, 3),
                 'price_direction': price_direction,
-                'range': round(candle_range, 4),
-                'body_size': round(body_size, 4),
-                'upper_wick': round(upper_wick, 4),
-                'lower_wick': round(lower_wick, 4),
-                'upper_wick_ratio': round(upper_wick_ratio, 4),
-                'lower_wick_ratio': round(lower_wick_ratio, 4),
-                'price_change': round(price_change, 4),
-                'price_change_pips': round(price_change * 10000, 2),
-                'pattern_name': pattern_info['name'],
-                'pattern_strength': pattern_info['strength'],
-                'pattern_reliability': pattern_info['reliability'],
-                'analysis_quality': self._calculate_candle_quality(body_ratio, candle_range, upper_wick_ratio, lower_wick_ratio),
-                'signal_clarity': self._calculate_signal_clarity(candle_color, price_direction, body_ratio)
-            }
-            
-            print(f"📊 ANALYSIS RESULTS:")
-            print(f"   Color: {candle_color}")
-            print(f"   Body Ratio: {body_ratio:.3f} ({body_ratio*100:.1f}%)")
-            print(f"   Price Direction: {price_direction}")
-            print(f"   Price Change: {price_change:+.4f} ({price_change*10000:+.1f} pips)")
-            print(f"   Range: {candle_range:.4f}")
-            print(f"   Pattern: {pattern_info['name']}")
-            
-            return analysis_result
-            
-        except Exception as e:
-            print(f"❌ Candlestick analysis error: {e}")
-            return self._get_fallback_analysis()
-        
-
-    def _recognize_advanced_patterns(self, candle_data: Dict) -> Dict:
-        """
-        🔍 จำแนก Candlestick Patterns ขั้นสูง - IMPROVED
-        
-        Args:
-            candle_data: ข้อมูลแท่งเทียนที่คำนวณแล้ว
-            
-        Returns:
-            Dict: ข้อมูล pattern ที่ละเอียด
-        """
-        try:
-            color = candle_data.get('color', '')
-            body_ratio = candle_data.get('body_ratio', 0)
-            upper_wick_ratio = candle_data.get('upper_wick_ratio', 0)
-            lower_wick_ratio = candle_data.get('lower_wick_ratio', 0)
-            momentum = candle_data.get('momentum', 0)
-            
-            pattern_name = 'standard'
-            pattern_strength = 0.5
-            reliability = 0.5
-            is_reversal = False
-            is_continuation = False
-            
-            # 🔧 IMPROVED: Doji Patterns (รายละเอียดขึ้น)
-            if body_ratio < 0.05:  # Doji threshold
-                if upper_wick_ratio > 0.4 and lower_wick_ratio < 0.1:
-                    pattern_name = 'gravestone_doji'
-                    pattern_strength = 0.8
-                    reliability = 0.75
-                    is_reversal = True
-                elif lower_wick_ratio > 0.4 and upper_wick_ratio < 0.1:
-                    pattern_name = 'dragonfly_doji'
-                    pattern_strength = 0.8
-                    reliability = 0.75
-                    is_reversal = True
-                elif upper_wick_ratio > 0.3 and lower_wick_ratio > 0.3:
-                    pattern_name = 'long_legged_doji'
-                    pattern_strength = 0.6
-                    reliability = 0.6
-                    is_reversal = True
-                else:
-                    pattern_name = 'classic_doji'
-                    pattern_strength = 0.5
-                    reliability = 0.5
-                    is_reversal = True
-            
-            # 🔧 IMPROVED: Hammer & Shooting Star (แม่นยำขึ้น)
-            elif body_ratio >= 0.2 and body_ratio <= 0.4:  # Body ปานกลาง
-                if color == 'green' and lower_wick_ratio > 0.5 and upper_wick_ratio < 0.1:
-                    pattern_name = 'hammer_bullish'
-                    pattern_strength = 0.85
-                    reliability = 0.8
-                    is_reversal = True
-                elif color == 'red' and upper_wick_ratio > 0.5 and lower_wick_ratio < 0.1:
-                    pattern_name = 'shooting_star'
-                    pattern_strength = 0.85
-                    reliability = 0.8
-                    is_reversal = True
-                elif color == 'green' and upper_wick_ratio > 0.5 and lower_wick_ratio < 0.1:
-                    pattern_name = 'inverted_hammer'
-                    pattern_strength = 0.7
-                    reliability = 0.65
-                    is_reversal = True
-                elif color == 'red' and lower_wick_ratio > 0.5 and upper_wick_ratio < 0.1:
-                    pattern_name = 'hanging_man'
-                    pattern_strength = 0.7
-                    reliability = 0.65
-                    is_reversal = True
-            
-            # 🔧 IMPROVED: Strong Trend Candles (ปรับปรุงการตัดสิน)
-            elif body_ratio > 0.6:  # Strong body
-                if color == 'green':
-                    if momentum > 0.5:
-                        pattern_name = 'strong_bullish_momentum'
-                        pattern_strength = 0.9
-                        reliability = 0.8
-                        is_continuation = True
-                    else:
-                        pattern_name = 'strong_bullish'
-                        pattern_strength = 0.75
-                        reliability = 0.7
-                        is_continuation = True
-                elif color == 'red':
-                    if momentum < -0.5:
-                        pattern_name = 'strong_bearish_momentum'
-                        pattern_strength = 0.9
-                        reliability = 0.8
-                        is_continuation = True
-                    else:
-                        pattern_name = 'strong_bearish'
-                        pattern_strength = 0.75
-                        reliability = 0.7
-                        is_continuation = True
-            
-            # 🔧 IMPROVED: Spinning Tops & Small Bodies
-            elif body_ratio >= 0.05 and body_ratio <= 0.2:  # Small body
-                if upper_wick_ratio > 0.3 and lower_wick_ratio > 0.3:
-                    pattern_name = 'spinning_top'
-                    pattern_strength = 0.4
-                    reliability = 0.5
-                    is_reversal = True
-                else:
-                    pattern_name = 'small_body'
-                    pattern_strength = 0.3
-                    reliability = 0.4
-            
-            # 🔧 IMPROVED: Medium Body Candles
-            else:  # body_ratio 0.2-0.6
-                if color == 'green':
-                    if lower_wick_ratio > 0.3:
-                        pattern_name = 'bullish_with_support'
-                        pattern_strength = 0.65
-                        reliability = 0.6
-                    else:
-                        pattern_name = 'medium_bullish'
-                        pattern_strength = 0.6
-                        reliability = 0.55
-                elif color == 'red':
-                    if upper_wick_ratio > 0.3:
-                        pattern_name = 'bearish_with_resistance'
-                        pattern_strength = 0.65
-                        reliability = 0.6
-                    else:
-                        pattern_name = 'medium_bearish'
-                        pattern_strength = 0.6
-                        reliability = 0.55
-                else:
-                    pattern_name = 'neutral_medium'
-                    pattern_strength = 0.4
-                    reliability = 0.4
-            
-            # 🔧 IMPROVED: ปรับ strength ตาม momentum
-            if abs(momentum) > 0.3:
-                pattern_strength *= (1 + abs(momentum) * 0.2)  # เพิ่ม 20% สำหรับ momentum แรง
-                pattern_strength = min(pattern_strength, 0.95)  # จำกัดไม่เกิน 95%
-            
-            return {
-                'name': pattern_name,
-                'strength': round(pattern_strength, 3),
-                'reliability': round(reliability, 3),
-                'is_reversal': is_reversal,
-                'is_continuation': is_continuation,
-                'body_ratio': round(body_ratio, 4),
-                'upper_wick_ratio': round(upper_wick_ratio, 4),
-                'lower_wick_ratio': round(lower_wick_ratio, 4),
-                'momentum_adjusted': abs(momentum) > 0.3
+                'range_change_percent': round(range_change_percent, 2),
+                'gap_type': gap_type,
+                'gap_up': gap_up,
+                'gap_down': gap_down,
+                'higher_high': higher_high,
+                'lower_low': lower_low,
+                'higher_low': higher_low,
+                'lower_high': lower_high,
+                'trend_direction': trend_direction,
+                'momentum': 'strong' if abs(price_change_percent) > 0.1 else 'weak'
             }
             
         except Exception as e:
-            print(f"❌ Advanced pattern recognition error: {e}")
+            print(f"❌ Candle comparison error: {e}")
+            return {'comparison_available': False}
+    
+    def _identify_candlestick_patterns(self, candles: List[Dict]) -> Dict:
+        """
+        🎯 จดจำ candlestick patterns - COMPLETE PATTERN RECOGNITION
+        
+        Args:
+            candles: รายการแท่งเทียน
+            
+        Returns:
+            Dict: ผล pattern recognition
+        """
+        try:
+            if len(candles) < 1:
+                return {'pattern_name': 'insufficient_data', 'pattern_strength': 0.0}
+            
+            current = candles[-1]
+            previous = candles[-2] if len(candles) >= 2 else None
+            third = candles[-3] if len(candles) >= 3 else None
+            
+            # Single candle patterns
+            single_pattern = self._identify_single_candle_patterns(current)
+            
+            # Two candle patterns
+            two_pattern = self._identify_two_candle_patterns(current, previous) if previous else None
+            
+            # Three candle patterns
+            three_pattern = self._identify_three_candle_patterns(current, previous, third) if third else None
+            
+            # เลือก pattern ที่แข็งแกร่งที่สุด
+            patterns = [single_pattern]
+            if two_pattern:
+                patterns.append(two_pattern)
+            if three_pattern:
+                patterns.append(three_pattern)
+            
+            # เรียงตาม strength และ confidence
+            patterns.sort(key=lambda p: (p['pattern_strength'], p.get('pattern_confidence', 0)), reverse=True)
+            
+            best_pattern = patterns[0]
+            
+            # ติดตาม pattern history
+            self._record_pattern_occurrence(best_pattern)
+            
             return {
-                'name': 'error',
-                'strength': 0.0,
-                'reliability': 0.0,
-                'is_reversal': False,
-                'is_continuation': False,
-                'body_ratio': 0,
-                'upper_wick_ratio': 0,
-                'lower_wick_ratio': 0,
-                'momentum_adjusted': False
+                'pattern_name': best_pattern['pattern_name'],
+                'pattern_type': best_pattern.get('pattern_type', 'single'),
+                'pattern_strength': best_pattern['pattern_strength'],
+                'pattern_confidence': best_pattern.get('pattern_confidence', 0.5),
+                'pattern_description': best_pattern.get('description', ''),
+                'bullish_signal': best_pattern.get('bullish', False),
+                'bearish_signal': best_pattern.get('bearish', False),
+                'reversal_signal': best_pattern.get('reversal', False),
+                'continuation_signal': best_pattern.get('continuation', False),
+                'alternative_patterns': [p['pattern_name'] for p in patterns[1:3]]  # top 2 alternatives
             }
-
-    def _calculate_candle_quality(self, body_ratio: float, candle_range: float, 
-                                upper_wick_ratio: float, lower_wick_ratio: float) -> float:
-        """
-        🎯 คำนวณคุณภาพของแท่งเทียน - IMPROVED ACCURACY
-        
-        Args:
-            body_ratio: สัดส่วน body
-            candle_range: ขนาดแท่งเทียน
-            upper_wick_ratio: สัดส่วน upper wick
-            lower_wick_ratio: สัดส่วน lower wick
-            
-        Returns:
-            float: คะแนนคุณภาพ 0-1
-        """
-        try:
-            # 🔧 IMPROVED: คะแนนจาก body ratio (แม่นยำขึ้น)
-            if body_ratio >= 0.7:  # body แข็งแกร่งมาก
-                ratio_score = 1.0
-            elif body_ratio >= 0.5:  # body แข็งแกร่ง
-                ratio_score = 0.9
-            elif body_ratio >= 0.3:  # body ปานกลาง
-                ratio_score = 0.7
-            elif body_ratio >= 0.15:  # body อ่อน
-                ratio_score = 0.5
-            elif body_ratio >= 0.05:  # body เล็ก
-                ratio_score = 0.3
-            else:  # doji หรือ body เล็กมาก
-                ratio_score = 0.4  # doji อาจมีความหมายพิเศษ
-            
-            # 🔧 IMPROVED: คะแนนจาก candle range (ความผันผวน)
-            if candle_range >= 8.0:  # แท่งใหญ่มาก (สำหรับทองคำ)
-                range_score = 1.0
-            elif candle_range >= 5.0:  # แท่งใหญ่
-                range_score = 0.9
-            elif candle_range >= 3.0:  # แท่งปานกลาง
-                range_score = 0.8
-            elif candle_range >= 1.5:  # แท่งเล็ก
-                range_score = 0.6
-            elif candle_range >= 0.8:  # แท่งเล็กมาก
-                range_score = 0.4
-            else:  # แท่งแคบมาก
-                range_score = 0.2
-            
-            # 🔧 IMPROVED: คะแนนจาก wick balance
-            wick_balance = abs(upper_wick_ratio - lower_wick_ratio)
-            if wick_balance < 0.1:  # wicks สมดุล
-                balance_score = 1.0
-            elif wick_balance < 0.3:  # wicks ค่อนข้างสมดุล
-                balance_score = 0.8
-            elif wick_balance < 0.5:  # wicks ไม่สมดุลเล็กน้อย
-                balance_score = 0.6
-            else:  # wicks ไม่สมดุลมาก (อาจเป็น reversal pattern)
-                balance_score = 0.7  # ให้คะแนนกลางๆ เพราะอาจมีความหมาย
-            
-            # 🔧 IMPROVED: รวมคะแนน (ปรับ weight ใหม่)
-            final_score = (
-                ratio_score * 0.5 +      # body สำคัญที่สุด
-                range_score * 0.3 +      # range สำคัญรอง
-                balance_score * 0.2      # balance เสริม
-            )
-            
-            return round(final_score, 3)
             
         except Exception as e:
-            print(f"❌ Candle quality calculation error: {e}")
-            return 0.5
-
-    def _calculate_signal_clarity(self, candle_color: str, price_direction: str, body_ratio: float) -> float:
-        """
-        🎯 คำนวณความชัดเจนของ Signal - NEW
-        
-        Args:
-            candle_color: สีแท่งเทียน
-            price_direction: ทิศทางราคา
-            body_ratio: สัดส่วน body
-            
-        Returns:
-            float: Signal clarity score (0.0 ถึง 1.0)
-        """
+            print(f"❌ Pattern identification error: {e}")
+            return {
+                'pattern_name': 'error',
+                'pattern_strength': 0.0,
+                'pattern_confidence': 0.0
+            }
+    
+    def _identify_single_candle_patterns(self, candle: Dict) -> Dict:
+        """🕯️ จดจำ single candle patterns"""
         try:
-            clarity_score = 0.0
+            o, h, l, c = candle['open'], candle['high'], candle['low'], candle['close']
+            candle_range = h - l
+            body_size = abs(c - o)
+            body_ratio = body_size / candle_range if candle_range > 0.0001 else 0
             
-            # ความสอดคล้องระหว่างสีและทิศทาง
-            if (candle_color == 'green' and price_direction == 'higher_close') or \
-               (candle_color == 'red' and price_direction == 'lower_close'):
-                clarity_score += 0.6  # สอดคล้องกัน
-            elif candle_color == 'doji':
-                clarity_score += 0.3  # neutral
-            else:
-                clarity_score += 0.1  # ไม่สอดคล้อง
+            upper_shadow = h - max(o, c)
+            lower_shadow = min(o, c) - l
+            upper_ratio = upper_shadow / candle_range if candle_range > 0.0001 else 0
+            lower_ratio = lower_shadow / candle_range if candle_range > 0.0001 else 0
             
-            # ความชัดเจนจาก body size
-            if body_ratio >= 0.5:
-                clarity_score += 0.4  # signal ชัดเจน
-            elif body_ratio >= 0.2:
-                clarity_score += 0.3  # signal ปานกลาง
-            elif body_ratio >= 0.05:
-                clarity_score += 0.2  # signal อ่อน
-            else:
-                clarity_score += 0.1  # signal คลุมเครือ
+            # Doji patterns
+            if body_ratio <= self.doji_threshold:
+                if upper_ratio > 0.4 and lower_ratio < 0.1:
+                    return {
+                        'pattern_name': 'dragonfly_doji',
+                        'pattern_strength': 0.7,
+                        'pattern_confidence': 0.8,
+                        'bullish': True,
+                        'reversal': True,
+                        'description': 'Dragonfly Doji - Bullish reversal'
+                    }
+                elif lower_ratio > 0.4 and upper_ratio < 0.1:
+                    return {
+                        'pattern_name': 'gravestone_doji',
+                        'pattern_strength': 0.7,
+                        'pattern_confidence': 0.8,
+                        'bearish': True,
+                        'reversal': True,
+                        'description': 'Gravestone Doji - Bearish reversal'
+                    }
+                else:
+                    return {
+                        'pattern_name': 'doji',
+                        'pattern_strength': 0.5,
+                        'pattern_confidence': 0.6,
+                        'reversal': True,
+                        'description': 'Standard Doji - Indecision'
+                    }
             
-            return round(min(clarity_score, 1.0), 3)
+            # Hammer patterns
+            if lower_ratio >= 0.6 and upper_ratio <= 0.1 and body_ratio >= 0.1:
+                bullish = c > o
+                return {
+                    'pattern_name': 'hammer' if bullish else 'hanging_man',
+                    'pattern_strength': 0.8,
+                    'pattern_confidence': 0.7,
+                    'bullish': bullish,
+                    'bearish': not bullish,
+                    'reversal': True,
+                    'description': f'{"Hammer - Bullish" if bullish else "Hanging Man - Bearish"} reversal'
+                }
             
-        except Exception as e:
-            return 0.5
-        
-    def _calculate_signal_clarity(self, candle_color: str, price_direction: str, body_ratio: float) -> float:
-        """
-        🎯 คำนวณความชัดเจนของ Signal - NEW
-        
-        Args:
-            candle_color: สีแท่งเทียน
-            price_direction: ทิศทางราคา
-            body_ratio: สัดส่วน body
+            # Shooting star / Inverted hammer
+            if upper_ratio >= 0.6 and lower_ratio <= 0.1 and body_ratio >= 0.1:
+                bullish = c > o
+                return {
+                    'pattern_name': 'inverted_hammer' if bullish else 'shooting_star',
+                    'pattern_strength': 0.8,
+                    'pattern_confidence': 0.7,
+                    'bullish': bullish,
+                    'bearish': not bullish,
+                    'reversal': True,
+                    'description': f'{"Inverted Hammer" if bullish else "Shooting Star"} reversal'
+                }
             
-        Returns:
-            float: Signal clarity score (0.0 ถึง 1.0)
-        """
-        try:
-            clarity_score = 0.0
+            # Marubozu (strong body, minimal shadows)
+            if body_ratio >= 0.9:
+                bullish = c > o
+                return {
+                    'pattern_name': 'marubozu',
+                    'pattern_strength': 0.9,
+                    'pattern_confidence': 0.8,
+                    'bullish': bullish,
+                    'bearish': not bullish,
+                    'continuation': True,
+                    'description': f'{"Bullish" if bullish else "Bearish"} Marubozu - Strong continuation'
+                }
             
-            # ความสอดคล้องระหว่างสีและทิศทาง
-            if (candle_color == 'green' and price_direction == 'higher_close') or \
-               (candle_color == 'red' and price_direction == 'lower_close'):
-                clarity_score += 0.6  # สอดคล้องกัน
-            elif candle_color == 'doji':
-                clarity_score += 0.3  # neutral
-            else:
-                clarity_score += 0.1  # ไม่สอดคล้อง
+            # Spinning top
+            if 0.1 < body_ratio < 0.3 and upper_ratio > 0.2 and lower_ratio > 0.2:
+                return {
+                    'pattern_name': 'spinning_top',
+                    'pattern_strength': 0.4,
+                    'pattern_confidence': 0.5,
+                    'reversal': True,
+                    'description': 'Spinning Top - Market indecision'
+                }
             
-            # ความชัดเจนจาก body size
-            if body_ratio >= 0.5:
-                clarity_score += 0.4  # signal ชัดเจน
-            elif body_ratio >= 0.2:
-                clarity_score += 0.3  # signal ปานกลาง
-            elif body_ratio >= 0.05:
-                clarity_score += 0.2  # signal อ่อน
-            else:
-                clarity_score += 0.1  # signal คลุมเครือ
-            
-            return round(min(clarity_score, 1.0), 3)
-            
-        except Exception as e:
-            return 0.5
-        
-    def _get_volume_analysis(self) -> Dict:
-        """
-        📊 วิเคราะห์ข้อมูล Volume - ULTRA SAFE VERSION
-        
-        Returns:
-            Dict: ข้อมูล volume analysis
-        """
-        try:
-            print(f"📊 Analyzing volume data...")
-            
-            # ดึงข้อมูล rates สำหรับ volume
-            rates = mt5.copy_rates_from_pos(
-                self.symbol, self.timeframe, 0, self.volume_lookback_periods + 1
-            )
-            
-            if rates is None:
-                print(f"❌ No rates data for volume analysis")
-                return self._get_fallback_volume()
-            
-            if len(rates) < 2:
-                print(f"❌ Not enough candles for volume analysis: {len(rates)}")
-                return self._get_fallback_volume()
-            
-            print(f"✅ Got {len(rates)} candles for volume analysis")
-            
-            # 🔧 SAFE VOLUME EXTRACTION
-            volumes = []
-            
-            for i, rate in enumerate(rates):
-                try:
-                    # Method 1: ลองใช้ dtype.names
-                    if hasattr(rate, 'dtype') and rate.dtype.names:
-                        if 'tick_volume' in rate.dtype.names:
-                            volume = int(rate['tick_volume'])
-                        elif 'real_volume' in rate.dtype.names:
-                            volume = int(rate['real_volume'])
-                        else:
-                            volume = 1000  # default volume
-                    else:
-                        # Method 2: ลองเข้าถึงโดยตรง
-                        try:
-                            volume = int(rate[4]) if len(rate) > 4 else 1000  # index 4 มักจะเป็น volume
-                        except:
-                            volume = 1000
-                    
-                    volumes.append(max(volume, 1))  # อย่างน้อย 1
-                    print(f"   📊 Rate[{i}] volume: {volume}")
-                    
-                except Exception as e:
-                    print(f"❌ Volume extraction error for rate[{i}]: {e}")
-                    volumes.append(1000)  # fallback volume
-            
-            # ตรวจสอบผลลัพธ์
-            if len(volumes) < 2:
-                print(f"❌ No valid volumes extracted")
-                return self._get_fallback_volume()
-            
-            # คำนวณ volume metrics
-            current_volume = volumes[0]  # แท่งปัจจุบัน
-            historical_volumes = volumes[1:]  # แท่งก่อนหน้า
-            
-            # กรอง volume ที่ไม่สมเหตุสมผล
-            valid_historical = [v for v in historical_volumes if 10 <= v <= 1000000]
-            
-            if len(valid_historical) == 0:
-                print(f"❌ No valid historical volumes")
-                return self._get_fallback_volume()
-            
-            avg_volume = sum(valid_historical) / len(valid_historical)
-            volume_factor = current_volume / avg_volume if avg_volume > 0 else 1.0
-            
-            # จำกัด volume factor ในช่วงที่สมเหตุสมผล
-            volume_factor = max(0.1, min(10.0, volume_factor))
-            
-            print(f"📊 Volume Analysis Results:")
-            print(f"   Current: {current_volume:,}")
-            print(f"   Average: {avg_volume:,.0f}")
-            print(f"   Factor: {volume_factor:.2f}")
-            print(f"   Valid samples: {len(valid_historical)}")
-            
-            self.volume_available = True
+            # Regular candle (default)
+            bullish = c > o
+            strength = min(body_ratio, 0.8)  # Cap at 0.8
             
             return {
-                'available': True,
-                'current': current_volume,
-                'average': round(avg_volume, 0),
-                'factor': round(volume_factor, 2),
-                'samples': len(valid_historical),
-                'source': 'mt5_safe'
+                'pattern_name': 'regular_candle',
+                'pattern_strength': strength,
+                'pattern_confidence': 0.5,
+                'bullish': bullish,
+                'bearish': not bullish,
+                'continuation': True,
+                'description': f'{"Bullish" if bullish else "Bearish"} regular candle'
+            }
+            
+        except Exception as e:
+            print(f"❌ Single pattern identification error: {e}")
+            return {
+                'pattern_name': 'error',
+                'pattern_strength': 0.0,
+                'pattern_confidence': 0.0
+            }
+    
+    def _identify_two_candle_patterns(self, current: Dict, previous: Dict) -> Dict:
+        """🕯️🕯️ จดจำ two candle patterns"""
+        try:
+            curr_o, curr_h, curr_l, curr_c = current['open'], current['high'], current['low'], current['close']
+            prev_o, prev_h, prev_l, prev_c = previous['open'], previous['high'], previous['low'], previous['close']
+            
+            curr_bullish = curr_c > curr_o
+            prev_bullish = prev_c > prev_o
+            
+            curr_body = abs(curr_c - curr_o)
+            prev_body = abs(prev_c - prev_o)
+            
+            curr_range = curr_h - curr_l
+            prev_range = prev_h - prev_l
+            
+            # Engulfing patterns
+            if curr_bullish and not prev_bullish:  # Bullish engulfing
+                if curr_o < prev_c and curr_c > prev_o and curr_body > prev_body:
+                    return {
+                        'pattern_name': 'bullish_engulfing',
+                        'pattern_type': 'two_candle',
+                        'pattern_strength': 0.85,
+                        'pattern_confidence': 0.8,
+                        'bullish': True,
+                        'reversal': True,
+                        'description': 'Bullish Engulfing - Strong reversal signal'
+                    }
+            
+            elif not curr_bullish and prev_bullish:  # Bearish engulfing
+                if curr_o > prev_c and curr_c < prev_o and curr_body > prev_body:
+                    return {
+                        'pattern_name': 'bearish_engulfing',
+                        'pattern_type': 'two_candle',
+                        'pattern_strength': 0.85,
+                        'pattern_confidence': 0.8,
+                        'bearish': True,
+                        'reversal': True,
+                        'description': 'Bearish Engulfing - Strong reversal signal'
+                    }
+            
+            # Piercing line / Dark cloud cover
+            if prev_bullish and not curr_bullish:  # Dark cloud cover
+                if curr_o > prev_h and curr_c < (prev_o + prev_c) / 2:
+                    return {
+                        'pattern_name': 'dark_cloud_cover',
+                        'pattern_type': 'two_candle',
+                        'pattern_strength': 0.7,
+                        'pattern_confidence': 0.7,
+                        'bearish': True,
+                        'reversal': True,
+                        'description': 'Dark Cloud Cover - Bearish reversal'
+                    }
+            
+            elif not prev_bullish and curr_bullish:  # Piercing line
+                if curr_o < prev_l and curr_c > (prev_o + prev_c) / 2:
+                    return {
+                        'pattern_name': 'piercing_line',
+                        'pattern_type': 'two_candle',
+                        'pattern_strength': 0.7,
+                        'pattern_confidence': 0.7,
+                        'bullish': True,
+                        'reversal': True,
+                        'description': 'Piercing Line - Bullish reversal'
+                    }
+            
+            # Tweezer patterns
+            if abs(curr_h - prev_h) < 0.0005:  # Tweezer tops
+                return {
+                    'pattern_name': 'tweezer_tops',
+                    'pattern_type': 'two_candle',
+                    'pattern_strength': 0.6,
+                    'pattern_confidence': 0.6,
+                    'bearish': True,
+                    'reversal': True,
+                    'description': 'Tweezer Tops - Bearish reversal'
+                }
+            
+            elif abs(curr_l - prev_l) < 0.0005:  # Tweezer bottoms
+                return {
+                    'pattern_name': 'tweezer_bottoms',
+                    'pattern_type': 'two_candle',
+                    'pattern_strength': 0.6,
+                    'pattern_confidence': 0.6,
+                    'bullish': True,
+                    'reversal': True,
+                    'description': 'Tweezer Bottoms - Bullish reversal'
+                }
+            
+            # Harami patterns
+            if curr_h < prev_h and curr_l > prev_l:  # Inside day
+                if curr_body < prev_body * 0.5:  # Small body inside large body
+                    return {
+                        'pattern_name': 'harami',
+                        'pattern_type': 'two_candle',
+                        'pattern_strength': 0.6,
+                        'pattern_confidence': 0.6,
+                        'reversal': True,
+                        'description': 'Harami - Reversal signal'
+                    }
+            
+            # Default: no significant two-candle pattern
+            return {
+                'pattern_name': 'no_two_pattern',
+                'pattern_type': 'two_candle',
+                'pattern_strength': 0.3,
+                'pattern_confidence': 0.3,
+                'description': 'No significant two-candle pattern'
+            }
+            
+        except Exception as e:
+            print(f"❌ Two candle pattern error: {e}")
+            return {
+                'pattern_name': 'two_pattern_error',
+                'pattern_strength': 0.0,
+                'pattern_confidence': 0.0
+            }
+    
+    def _identify_three_candle_patterns(self, current: Dict, previous: Dict, third: Dict) -> Dict:
+        """🕯️🕯️🕯️ จดจำ three candle patterns"""
+        try:
+            # Morning star / Evening star patterns
+            curr_bullish = current['close'] > current['open']
+            prev_body_small = abs(previous['close'] - previous['open']) < (previous['high'] - previous['low']) * 0.3
+            third_bullish = third['close'] > third['open']
+            
+            # Morning Star
+            if not third_bullish and prev_body_small and curr_bullish:
+                if (current['close'] > (third['open'] + third['close']) / 2 and 
+                    previous['low'] < min(third['low'], current['low'])):
+                    return {
+                        'pattern_name': 'morning_star',
+                        'pattern_type': 'three_candle',
+                        'pattern_strength': 0.9,
+                        'pattern_confidence': 0.8,
+                        'bullish': True,
+                        'reversal': True,
+                        'description': 'Morning Star - Strong bullish reversal'
+                    }
+            
+            # Evening Star
+            elif third_bullish and prev_body_small and not curr_bullish:
+                if (current['close'] < (third['open'] + third['close']) / 2 and 
+                    previous['high'] > max(third['high'], current['high'])):
+                    return {
+                        'pattern_name': 'evening_star',
+                        'pattern_type': 'three_candle',
+                        'pattern_strength': 0.9,
+                        'pattern_confidence': 0.8,
+                        'bearish': True,
+                        'reversal': True,
+                        'description': 'Evening Star - Strong bearish reversal'
+                    }
+            
+            # Three white soldiers / Three black crows
+            if curr_bullish and (previous['close'] > previous['open']) and third_bullish:
+                if (current['close'] > previous['close'] > third['close'] and
+                    current['open'] > previous['open'] > third['open']):
+                    return {
+                        'pattern_name': 'three_white_soldiers',
+                        'pattern_type': 'three_candle',
+                        'pattern_strength': 0.8,
+                        'pattern_confidence': 0.7,
+                        'bullish': True,
+                        'continuation': True,
+                        'description': 'Three White Soldiers - Strong bullish continuation'
+                    }
+            
+            elif not curr_bullish and (previous['close'] < previous['open']) and not third_bullish:
+                if (current['close'] < previous['close'] < third['close'] and
+                    current['open'] < previous['open'] < third['open']):
+                    return {
+                        'pattern_name': 'three_black_crows',
+                        'pattern_type': 'three_candle',
+                        'pattern_strength': 0.8,
+                        'pattern_confidence': 0.7,
+                        'bearish': True,
+                        'continuation': True,
+                        'description': 'Three Black Crows - Strong bearish continuation'
+                    }
+            
+            # Default: no three-candle pattern
+            return {
+                'pattern_name': 'no_three_pattern',
+                'pattern_type': 'three_candle',
+                'pattern_strength': 0.2,
+                'pattern_confidence': 0.2,
+                'description': 'No significant three-candle pattern'
+            }
+            
+        except Exception as e:
+            print(f"❌ Three candle pattern error: {e}")
+            return {
+                'pattern_name': 'three_pattern_error',
+                'pattern_strength': 0.0,
+                'pattern_confidence': 0.0
+            }
+    
+    def _analyze_volume_confirmation(self, candles: List[Dict]) -> Dict:
+        """
+        📊 วิเคราะห์ volume confirmation - COMPLETE
+        
+        Args:
+            candles: รายการแท่งเทียน
+            
+        Returns:
+            Dict: ผลการวิเคราะห์ volume
+        """
+        try:
+            if not self.volume_confirmation_enabled:
+                return {
+                    'volume_available': False,
+                    'volume_confirmation': False,
+                    'volume_analysis': 'disabled',
+                    'volume_strength': 0.0
+                }
+            
+            current = candles[-1]
+            current_volume = current.get('real_volume', 0)
+            
+            # ถ้าไม่มี volume data หรือ volume = 0
+            if current_volume <= 0:
+                if self.volume_fallback_enabled:
+                    return {
+                        'volume_available': False,
+                        'volume_confirmation': True,  # ใช้ fallback
+                        'volume_analysis': 'fallback_confirmation',
+                        'volume_strength': 0.5,
+                        'fallback_reason': 'no_volume_data'
+                    }
+                else:
+                    return {
+                        'volume_available': False,
+                        'volume_confirmation': False,
+                        'volume_analysis': 'no_data',
+                        'volume_strength': 0.0
+                    }
+            
+            # คำนวณ average volume
+            if not self.volume_history or len(self.volume_history) < 5:
+                # ไม่มี history พอ ใช้ fallback
+                return {
+                    'volume_available': True,
+                    'volume_confirmation': True,
+                    'volume_analysis': 'insufficient_history',
+                    'volume_strength': 0.6,
+                    'current_volume': current_volume,
+                    'fallback_reason': 'insufficient_volume_history'
+                }
+            
+            # มี volume history เพียงพอ
+            avg_volume = statistics.mean(self.volume_history)
+            volume_ratio = current_volume / avg_volume if avg_volume > 0 else 1.0
+            
+            # Volume confirmation logic
+            volume_confirmed = volume_ratio >= 1.2  # 120% of average
+            volume_spike = volume_ratio >= self.volume_spike_threshold  # 150% of average
+            
+            # Volume strength calculation
+            if volume_spike:
+                volume_strength = min(0.9, 0.5 + (volume_ratio - 1.5) * 0.2)
+            elif volume_confirmed:
+                volume_strength = 0.5 + (volume_ratio - 1.2) * 0.3
+            else:
+                volume_strength = max(0.1, volume_ratio * 0.4)
+            
+            # Volume analysis description
+            if volume_spike:
+                analysis = 'volume_spike'
+            elif volume_confirmed:
+                analysis = 'volume_confirmed'
+            elif volume_ratio > 0.8:
+                analysis = 'normal_volume'
+            else:
+                analysis = 'low_volume'
+            
+            return {
+                'volume_available': True,
+                'volume_confirmation': volume_confirmed,
+                'volume_spike': volume_spike,
+                'volume_analysis': analysis,
+                'volume_strength': round(volume_strength, 3),
+                'current_volume': current_volume,
+                'average_volume': round(avg_volume, 0),
+                'volume_ratio': round(volume_ratio, 2),
+                'volume_percentile': self._calculate_volume_percentile(current_volume)
             }
             
         except Exception as e:
             print(f"❌ Volume analysis error: {e}")
-            return self._get_fallback_volume()
-
-    def _get_fallback_volume(self) -> Dict:
-        """📊 Fallback volume data เมื่อดึงจาก MT5 ไม่ได้"""
-        return {
-            'available': False,
-            'current': 1000,
-            'average': 1000,
-            'factor': 1.0,
-            'samples': 0,
-            'source': 'fallback'
-        }
+            # Fallback on error
+            return {
+                'volume_available': False,
+                'volume_confirmation': True,
+                'volume_analysis': 'error_fallback',
+                'volume_strength': 0.5,
+                'error': str(e)
+            }
     
-    def reset_timestamp_tracking(self):
-        """🔄 รีเซ็ตการติดตาม timestamp (สำหรับ debug)"""
+    def _analyze_market_context(self, candles: List[Dict]) -> Dict:
+        """
+        🌍 วิเคราะห์ market context - COMPLETE
+        
+        Args:
+            candles: รายการแท่งเทียน
+            
+        Returns:
+            Dict: ผลการวิเคราะห์ market context
+        """
         try:
-            self.last_processed_timestamp = 0
-            print(f"🔄 Timestamp tracking reset")
+            current_time = datetime.now()
+            current_candle = candles[-1]
+            
+            # Trading session detection
+            session_info = self._detect_trading_session(current_time)
+            
+            # Market volatility analysis
+            volatility_info = self._analyze_market_volatility(candles)
+            
+            # Trend analysis (short-term)
+            trend_info = self._analyze_short_term_trend(candles)
+            
+            # Support/Resistance levels
+            sr_info = self._analyze_support_resistance(candles)
+            
+            return {
+                **session_info,
+                **volatility_info,
+                **trend_info,
+                **sr_info,
+                'market_context_timestamp': current_time,
+                'context_quality': self._calculate_context_quality(session_info, volatility_info, trend_info)
+            }
+            
+        except Exception as e:
+            print(f"❌ Market context analysis error: {e}")
+            return {
+                'trading_session': 'unknown',
+                'volatility_level': 'medium',
+                'trend_direction': 'sideways',
+                'context_quality': 0.3
+            }
+    
+    # ==========================================
+    # 🔧 HELPER & UTILITY METHODS - COMPLETE  
+    # ==========================================
+    
+    def _validate_connection(self) -> bool:
+        """✅ ตรวจสอบการเชื่อมต่อ"""
+        try:
+            if not self.mt5_connector:
+                print("❌ No MT5 connector")
+                return False
+            
+            if not self.mt5_connector.is_connected:
+                print("❌ MT5 not connected")
+                return False
+            
+            if not self.symbol:
+                print("❌ No symbol specified")
+                return False
+            
             return True
+            
         except Exception as e:
-            print(f"❌ Reset error: {e}")
+            print(f"❌ Connection validation error: {e}")
             return False
-
-    def get_timestamp_info(self) -> Dict:
-        """📊 ข้อมูลการติดตาม timestamp"""
+    
+    def _validate_ohlc_data(self, candle: Dict) -> bool:
+        """✅ ตรวจสอบความถูกต้องของ OHLC data"""
         try:
-            last_time = self.last_processed_timestamp
-            if last_time > 0:
-                last_datetime = datetime.fromtimestamp(last_time)
-                time_ago = (datetime.now() - last_datetime).total_seconds()
-            else:
-                last_datetime = None
-                time_ago = 0
+            o, h, l, c = candle['open'], candle['high'], candle['low'], candle['close']
             
-            return {
-                'last_processed_timestamp': last_time,
-                'last_processed_datetime': last_datetime.isoformat() if last_datetime else None,
-                'seconds_since_last': time_ago,
-                'next_expected_in_seconds': max(0, 300 - time_ago)  # M5 = 300 วินาที
-            }
+            # ตรวจสอบว่าเป็นตัวเลข
+            if not all(isinstance(x, (int, float)) for x in [o, h, l, c]):
+                return False
+            
+            # ตรวจสอบว่าเป็นค่าบวก
+            if not all(x > 0 for x in [o, h, l, c]):
+                return False
+            
+            # ตรวจสอบความสัมพันธ์ OHLC
+            if not (l <= min(o, c) <= max(o, c) <= h):
+                return False
+            
+            # ตรวจสอบว่า high >= low
+            if h < l:
+                return False
+            
+            return True
+            
         except Exception as e:
-            return {'error': str(e)}
+            return False
     
-    # ==========================================
-    # 🔍 PATTERN RECOGNITION
-    # ==========================================
-    
-    def _recognize_basic_patterns(self, candle_data: Dict) -> Dict:
-        """
-        🔍 จำแนก Pattern พื้นฐาน
-        
-        Args:
-            candle_data: ข้อมูลแท่งเทียน
-            
-        Returns:
-            Dict: ข้อมูล pattern
-        """
+    def _validate_basic_candle_data(self, candle: Dict) -> bool:
+        """✅ ตรวจสอบข้อมูลพื้นฐานของแท่งเทียน"""
         try:
-            color = candle_data.get('color', '')
-            body_ratio = candle_data.get('body_ratio', 0)
-            upper_wick = candle_data.get('upper_wick', 0)
-            lower_wick = candle_data.get('lower_wick', 0)
-            candle_range = candle_data.get('candle_range', 0)
+            required_fields = ['time', 'open', 'high', 'low', 'close']
             
-            # คำนวณสัดส่วน wicks
-            upper_wick_ratio = upper_wick / candle_range if candle_range > 0 else 0
-            lower_wick_ratio = lower_wick / candle_range if candle_range > 0 else 0
+            for field in required_fields:
+                if field not in candle:
+                    return False
             
-            # จำแนก pattern
-            if body_ratio < self.doji_threshold:
-                # Doji patterns
-                if upper_wick_ratio > 0.4:
-                    pattern_name = 'dragonfly_doji' if lower_wick_ratio < 0.1 else 'long_legged_doji'
-                elif lower_wick_ratio > 0.4:
-                    pattern_name = 'gravestone_doji'
-                else:
-                    pattern_name = 'classic_doji'
-                pattern_strength = 0.6
+            return self._validate_ohlc_data(candle)
+            
+        except Exception as e:
+            return False
+    
+    def _enhance_candle_data(self, candle: Dict) -> Dict:
+        """🔧 เพิ่มข้อมูลเสริมให้แท่งเทียน"""
+        try:
+            enhanced = candle.copy()
+            
+            # เพิ่ม datetime ถ้ายังไม่มี
+            if 'datetime' not in enhanced:
+                enhanced['datetime'] = datetime.fromtimestamp(candle['time'])
+            
+            # คำนวณข้อมูลเสริม
+            o, h, l, c = candle['open'], candle['high'], candle['low'], candle['close']
+            
+            enhanced.update({
+                'range': h - l,
+                'body_size': abs(c - o),
+                'upper_shadow': h - max(o, c),
+                'lower_shadow': min(o, c) - l,
+                'is_bullish': c > o,
+                'is_bearish': c < o,
+                'midpoint': (h + l) / 2,
+                'typical_price': (h + l + c) / 3
+            })
+            
+            return enhanced
+            
+        except Exception as e:
+            print(f"❌ Enhance candle data error: {e}")
+            return candle
+    
+    def _generate_candle_signature(self, candle: Dict) -> str:
+        """🔑 สร้าง signature สำหรับแท่งเทียน"""
+        try:
+            timestamp = candle['time']
+            close_price = candle['close']
+            
+            # สร้าง signature ที่ unique
+            signature = f"CANDLE_{timestamp}_{close_price:.2f}_{candle.get('tick_volume', 0)}"
+            
+            return signature
+            
+        except Exception as e:
+            return f"CANDLE_ERROR_{int(time.time())}"
+    
+    def _is_already_processed(self, signature: str) -> bool:
+        """🔒 ตรวจสอบว่า signature นี้ถูกประมวลผลแล้วหรือยัง"""
+        try:
+            is_processed = signature in self.processed_signatures
+            
+            if not is_processed:
+                # เพิ่มใน set และทำความสะอาดถ้าจำเป็น
+                self.processed_signatures.add(signature)
                 
-            elif body_ratio > self.strong_body_threshold:
-                # Strong trend candles
-                if color == 'green':
-                    if lower_wick_ratio > 0.3:
-                        pattern_name = 'hammer_bullish'
-                        pattern_strength = 0.8
-                    else:
-                        pattern_name = 'strong_bullish'
-                        pattern_strength = 0.7
-                elif color == 'red':
-                    if upper_wick_ratio > 0.3:
-                        pattern_name = 'shooting_star'
-                        pattern_strength = 0.8
-                    else:
-                        pattern_name = 'strong_bearish'
-                        pattern_strength = 0.7
-                else:
-                    pattern_name = 'neutral'
-                    pattern_strength = 0.5
-                    
-            else:
-                # Standard candles
-                if color == 'green':
-                    pattern_name = 'green_candle'
-                    pattern_strength = 0.5
-                elif color == 'red':
-                    pattern_name = 'red_candle'
-                    pattern_strength = 0.5
-                else:
-                    pattern_name = 'neutral_candle'
-                    pattern_strength = 0.3
+                if len(self.processed_signatures) > self.max_signature_history:
+                    # เก็บแค่ 400 signatures ล่าสุด
+                    signatures_list = list(self.processed_signatures)
+                    self.processed_signatures = set(signatures_list[-400:])
             
-            return {
-                'name': pattern_name,
-                'strength': pattern_strength,
-                'body_ratio': body_ratio,
-                'upper_wick_ratio': upper_wick_ratio,
-                'lower_wick_ratio': lower_wick_ratio
-            }
+            return is_processed
             
         except Exception as e:
-            print(f"❌ Pattern recognition error: {e}")
-            return {
-                'name': 'unknown',
-                'strength': 0.5,
-                'body_ratio': 0,
-                'upper_wick_ratio': 0,
-                'lower_wick_ratio': 0
-            }
-        
-    def _calculate_analysis_strength(self, candlestick_data: Dict, volume_data: Dict) -> float:
-        """
-        💪 คำนวณความแข็งแกร่งของการวิเคราะห์
-        
-        Args:
-            candlestick_data: ผลการวิเคราะห์แท่งเทียน
-            volume_data: ผลการวิเคราะห์ volume
-            
-        Returns:
-            float: คะแนนความแข็งแกร่ง 0-1
-        """
+            print(f"❌ Signature check error: {e}")
+            return False
+    
+    def _record_successful_analysis(self, signature: str, analysis: Dict):
+        """📝 บันทึกการวิเคราะห์ที่สำเร็จ"""
         try:
-            # คะแนนจาก pattern
-            pattern_strength = candlestick_data.get('strength', 0.5)
+            # บันทึก signature
+            self.processed_signatures.add(signature)
             
-            # คะแนนจาก volume
-            if volume_data['available']:
-                volume_factor = volume_data['factor']
-                if volume_factor >= 1.5:  # volume สูง
-                    volume_score = 1.0
-                elif volume_factor >= 1.2:  # volume ปานกลาง
-                    volume_score = 0.8
-                else:  # volume ปกติหรือต่ำ
-                    volume_score = 0.6
+            # บันทึกลง persistence ถ้ามี
+            if self.persistence_manager:
+                self.persistence_manager.save_processed_signatures(self.processed_signatures)
+            
+            # อัพเดท cache
+            self.cached_analysis = analysis
+            self.last_analysis_time = datetime.now()
+            
+        except Exception as e:
+            print(f"❌ Record successful analysis error: {e}")
+    
+    def _update_volume_tracking(self, candles: List[Dict]):
+        """📊 อัพเดท volume tracking"""
+        try:
+            if not candles:
+                return
+            
+            # ดึง volume จากแท่งล่าสุด
+            latest_volumes = []
+            
+            for candle in candles[-self.max_volume_history:]:
+                volume = candle.get('real_volume', 0)
+                if volume > 0:
+                    latest_volumes.append(volume)
+            
+            if latest_volumes:
+                self.volume_history = latest_volumes
+                self.avg_volume = statistics.mean(latest_volumes)
+                self.volume_available = True
+                
+                print(f"📊 Volume updated: {len(latest_volumes)} samples, avg: {self.avg_volume:.0f}")
             else:
-                volume_score = 0.7  # ไม่มี volume = คะแนนกลางๆ
+                self.volume_available = False
+                print(f"📊 No volume data available")
+                
+        except Exception as e:
+            print(f"❌ Volume tracking error: {e}")
+            self.volume_available = False
+    
+    def _record_pattern_occurrence(self, pattern: Dict):
+        """📈 บันทึกการเกิด pattern"""
+        try:
+            pattern_name = pattern['pattern_name']
             
-            # คะแนนจาก body ratio
-            body_ratio = candlestick_data.get('body_ratio', 0)
-            if body_ratio >= 0.4:
-                body_score = 1.0
-            elif body_ratio >= 0.2:
-                body_score = 0.8
-            else:
-                body_score = 0.5
+            if pattern_name not in self.pattern_success_rates:
+                self.pattern_success_rates[pattern_name] = {
+                    'occurrences': 0,
+                    'total_strength': 0.0,
+                    'avg_strength': 0.0
+                }
             
-            # รวมคะแนน
-            final_strength = (
-                pattern_strength * 0.4 +
-                volume_score * 0.3 +
-                body_score * 0.3
+            stats = self.pattern_success_rates[pattern_name]
+            stats['occurrences'] += 1
+            stats['total_strength'] += pattern['pattern_strength']
+            stats['avg_strength'] = stats['total_strength'] / stats['occurrences']
+            
+            # เก็บ history (จำกัดที่ 100)
+            self.pattern_history.append({
+                'timestamp': datetime.now(),
+                'pattern_name': pattern_name,
+                'strength': pattern['pattern_strength']
+            })
+            
+            if len(self.pattern_history) > 100:
+                self.pattern_history = self.pattern_history[-100:]
+                
+        except Exception as e:
+            print(f"❌ Pattern recording error: {e}")
+    
+    def _calculate_analysis_strength(self, basic: Dict, comparison: Dict, pattern: Dict, volume: Dict) -> float:
+        """💪 คำนวณความแรงของการวิเคราะห์"""
+        try:
+            # Base strength from pattern
+            pattern_strength = pattern.get('pattern_strength', 0.5)
+            pattern_confidence = pattern.get('pattern_confidence', 0.5)
+            
+            # Volume contribution
+            volume_strength = volume.get('volume_strength', 0.5)
+            volume_weight = 0.3 if volume.get('volume_available') else 0.1
+            
+            # Body ratio contribution
+            body_ratio = basic.get('body_ratio', 0.3)
+            body_strength = min(body_ratio * 1.5, 1.0)  # Cap at 1.0
+            
+            # Comparison strength
+            comparison_strength = 0.5
+            if comparison.get('comparison_available'):
+                momentum = comparison.get('momentum', 'weak')
+                comparison_strength = 0.7 if momentum == 'strong' else 0.5
+            
+            # Calculate weighted average
+            weights = {
+                'pattern': 0.4,
+                'volume': volume_weight,
+                'body': 0.2,
+                'comparison': 0.3 - (volume_weight - 0.1)  # Adjust for volume weight
+            }
+            
+            total_strength = (
+                pattern_strength * pattern_confidence * weights['pattern'] +
+                volume_strength * weights['volume'] +
+                body_strength * weights['body'] +
+                comparison_strength * weights['comparison']
             )
             
-            return round(final_strength, 3)
+            return round(min(total_strength, 1.0), 3)
             
         except Exception as e:
             print(f"❌ Analysis strength calculation error: {e}")
             return 0.5
     
-    def _get_market_context(self, current_candle: Dict) -> str:
-        """
-        🌍 ดึงข้อมูล Market Context
-        
-        Args:
-            current_candle: ข้อมูลแท่งปัจจุบัน
-            
-        Returns:
-            str: ประเภท market context
-        """
+    def _calculate_analysis_quality(self, candles: List[Dict]) -> float:
+        """🎯 คำนวณคุณภาพของการวิเคราะห์"""
         try:
-            # ตรวจสอบ trading session
-            current_time = datetime.now()
-            hour = current_time.hour
+            quality_score = 0.5  # Base score
             
-            if 1 <= hour < 9:    # Asian session
-                session = 'asian'
-            elif 9 <= hour < 17:  # London session
-                session = 'london'
-            elif 17 <= hour < 24: # New York session
-                session = 'newyork'
-            else:                 # Overlap
-                session = 'overlap'
+            # Data quantity factor
+            data_factor = min(len(candles) / 10.0, 1.0)  # Full score at 10+ candles
+            quality_score += data_factor * 0.2
             
-            # ดูความผันผวน
-            candle_range = current_candle['high'] - current_candle['low']
-            if candle_range >= 5.0:
-                volatility = 'high'
-            elif candle_range >= 2.0:
-                volatility = 'medium'
-            else:
-                volatility = 'low'
+            # Volume availability factor
+            if self.volume_available:
+                quality_score += 0.1
             
-            return f"{session}_{volatility}"
+            # Time consistency factor
+            if self.analysis_count > 0:
+                success_rate = self.successful_analysis / self.analysis_count
+                quality_score += success_rate * 0.2
+            
+            return round(min(quality_score, 1.0), 3)
             
         except Exception as e:
-            print(f"❌ Market context error: {e}")
-            return "unknown_medium"
+            return 0.5
     
-    # ==========================================
-    # 🔧 UTILITY & HELPER METHODS
-    # ==========================================
+    def _detect_trading_session(self, current_time: datetime) -> Dict:
+        """🌍 ตรวจจับ trading session"""
+        try:
+            hour = current_time.hour
+            
+            # Convert to major trading sessions (approximate)
+            if 1 <= hour < 9:
+                session = 'asian'
+                session_activity = 'medium'
+            elif 9 <= hour < 17:
+                session = 'london'
+                session_activity = 'high'
+            elif 17 <= hour <= 23:
+                session = 'newyork'
+                session_activity = 'high'
+            else:
+                session = 'quiet'
+                session_activity = 'low'
+            
+            # Overlap periods
+            overlap = None
+            if 9 <= hour < 11:
+                overlap = 'london_asian'
+            elif 17 <= hour < 19:
+                overlap = 'london_newyork'
+            
+            return {
+                'trading_session': session,
+                'session_activity': session_activity,
+                'session_overlap': overlap,
+                'session_hour': hour
+            }
+            
+        except Exception as e:
+            return {
+                'trading_session': 'unknown',
+                'session_activity': 'medium'
+            }
+    
+    def _analyze_market_volatility(self, candles: List[Dict]) -> Dict:
+        """📊 วิเคราะห์ความผันผวนของตลาด"""
+        try:
+            if len(candles) < 5:
+                return {'volatility_level': 'unknown', 'volatility_score': 0.5}
+            
+            # คำนวณ average range ของ 5 แท่งล่าสุด
+            recent_ranges = []
+            for candle in candles[-5:]:
+                range_val = candle['high'] - candle['low']
+                recent_ranges.append(range_val)
+            
+            avg_range = statistics.mean(recent_ranges)
+            current_range = candles[-1]['high'] - candles[-1]['low']
+            
+            # Volatility assessment
+            volatility_ratio = current_range / avg_range if avg_range > 0 else 1.0
+            
+            if volatility_ratio >= 1.5:
+                volatility_level = 'high'
+                volatility_score = 0.8
+            elif volatility_ratio >= 1.2:
+                volatility_level = 'medium_high'
+                volatility_score = 0.7
+            elif volatility_ratio >= 0.8:
+                volatility_level = 'medium'
+                volatility_score = 0.5
+            else:
+                volatility_level = 'low'
+                volatility_score = 0.3
+            
+            return {
+                'volatility_level': volatility_level,
+                'volatility_score': volatility_score,
+                'volatility_ratio': round(volatility_ratio, 2),
+                'current_range': round(current_range, 4),
+                'avg_range': round(avg_range, 4)
+            }
+            
+        except Exception as e:
+            return {
+                'volatility_level': 'medium',
+                'volatility_score': 0.5
+            }
+    
+    def _analyze_short_term_trend(self, candles: List[Dict]) -> Dict:
+        """📈 วิเคราะห์เทรนด์ระยะสั้น"""
+        try:
+            if len(candles) < 3:
+                return {'trend_direction': 'sideways', 'trend_strength': 0.5}
+            
+            # ใช้ 3 แท่งล่าสุดในการกำหนดเทรนด์
+            closes = [candle['close'] for candle in candles[-3:]]
+            
+            # คำนวณการเปลี่ยนแปลง
+            change1 = closes[1] - closes[0]
+            change2 = closes[2] - closes[1]
+            total_change = closes[2] - closes[0]
+            
+            # กำหนดทิศทาง
+            threshold = 0.0005  # Threshold สำหรับทองคำ
+            
+            if total_change > threshold and change1 > 0 and change2 > 0:
+                trend_direction = 'bullish'
+                trend_strength = 0.8
+            elif total_change < -threshold and change1 < 0 and change2 < 0:
+                trend_direction = 'bearish'
+                trend_strength = 0.8
+            elif abs(total_change) > threshold:
+                if total_change > 0:
+                    trend_direction = 'bullish_weak'
+                    trend_strength = 0.6
+                else:
+                    trend_direction = 'bearish_weak'
+                    trend_strength = 0.6
+            else:
+                trend_direction = 'sideways'
+                trend_strength = 0.4
+            
+            return {
+                'trend_direction': trend_direction,
+                'trend_strength': trend_strength,
+                'total_change': round(total_change, 5),
+                'trend_consistency': 1.0 if (change1 > 0) == (change2 > 0) else 0.5
+            }
+            
+        except Exception as e:
+            return {
+                'trend_direction': 'sideways',
+                'trend_strength': 0.5
+            }
+    
+    def _analyze_support_resistance(self, candles: List[Dict]) -> Dict:
+        """📊 วิเคราะห์ Support/Resistance ระยะสั้น"""
+        try:
+            if len(candles) < 5:
+                return {'sr_analysis': 'insufficient_data'}
+            
+            # ใช้ high/low ของ 5 แท่งล่าสุด
+            highs = [candle['high'] for candle in candles[-5:]]
+            lows = [candle['low'] for candle in candles[-5:]]
+            
+            current = candles[-1]
+            current_close = current['close']
+            
+            # หา potential resistance (highest high)
+            max_high = max(highs)
+            resistance_distance = abs(current_close - max_high)
+            
+            # หา potential support (lowest low)
+            min_low = min(lows)
+            support_distance = abs(current_close - min_low)
+            
+            # กำหนดระดับความใกล้
+            close_threshold = 0.002  # สำหรับทองคำ
+            
+            near_resistance = resistance_distance < close_threshold
+            near_support = support_distance < close_threshold
+            
+            # คำนวณ position ในช่วง
+            range_size = max_high - min_low
+            position_in_range = (current_close - min_low) / range_size if range_size > 0 else 0.5
+            
+            return {
+                'sr_analysis': 'available',
+                'resistance_level': round(max_high, 4),
+                'support_level': round(min_low, 4),
+                'near_resistance': near_resistance,
+                'near_support': near_support,
+                'position_in_range': round(position_in_range, 2),
+                'range_size': round(range_size, 4)
+            }
+            
+        except Exception as e:
+            return {'sr_analysis': 'error'}
+    
+    def _calculate_volume_percentile(self, current_volume: float) -> float:
+        """📊 คำนวณ volume percentile"""
+        try:
+            if not self.volume_history or len(self.volume_history) < 5:
+                return 50.0  # Default middle percentile
+            
+            sorted_volumes = sorted(self.volume_history)
+            
+            # หาตำแหน่งของ current_volume
+            position = 0
+            for vol in sorted_volumes:
+                if current_volume > vol:
+                    position += 1
+                else:
+                    break
+            
+            percentile = (position / len(sorted_volumes)) * 100
+            return round(percentile, 1)
+            
+        except Exception as e:
+            return 50.0
+    
+    def _calculate_context_quality(self, session_info: Dict, volatility_info: Dict, trend_info: Dict) -> float:
+        """🎯 คำนวณคุณภาพของ context"""
+        try:
+            quality_score = 0.3  # Base score
+            
+            # Session quality
+            activity = session_info.get('session_activity', 'medium')
+            if activity == 'high':
+                quality_score += 0.3
+            elif activity == 'medium':
+                quality_score += 0.2
+            else:
+                quality_score += 0.1
+            
+            # Volatility contribution
+            vol_level = volatility_info.get('volatility_level', 'medium')
+            if vol_level in ['medium', 'medium_high']:
+                quality_score += 0.2
+            elif vol_level == 'high':
+                quality_score += 0.1
+            else:
+                quality_score += 0.05
+            
+            # Trend clarity
+            trend_strength = trend_info.get('trend_strength', 0.5)
+            quality_score += trend_strength * 0.2
+            
+            return round(min(quality_score, 1.0), 2)
+            
+        except Exception as e:
+            return 0.5
     
     def _is_cache_valid(self) -> bool:
-        """🔧 ตรวจสอบ Cache - ปรับให้เหมาะกับ real-time"""
+        """🔧 ตรวจสอบ Cache"""
         try:
             if self.cached_analysis is None:
                 return False
             
-            # 🔧 NEW: Cache valid นานขึ้นสำหรับแท่งที่ปิดแล้ว
             time_diff = (datetime.now() - self.last_analysis_time).total_seconds()
             return time_diff < self.cache_duration_seconds
             
         except Exception as e:
             return False
-            
+    
     def _get_fallback_analysis(self) -> Dict:
         """⚠️ ข้อมูล fallback เมื่อ analysis ล้มเหลว"""
         return {
-            'color': 'neutral',
+            'candle_color': 'neutral',
             'body_ratio': 0.1,
-            'price_direction': 'same_close',
-            'range': 1.0,
-            'body_size': 0.1,
-            'upper_wick': 0.45,
-            'lower_wick': 0.45,
             'pattern_name': 'error',
             'pattern_strength': 0.0,
-            'analysis_quality': 0.0
+            'analysis_strength': 0.0,
+            'volume_confirmation': True,  # Fallback confirmation
+            'trading_session': 'unknown',
+            'volatility_level': 'medium',
+            'trend_direction': 'sideways',
+            'error': True,
+            'timestamp': int(time.time()),
+            'datetime': datetime.now()
         }
     
-    def refresh_cache(self):
+    # ==========================================
+    # 📊 STATISTICS & MONITORING METHODS
+    # ==========================================
+    
+    def get_analysis_statistics(self) -> Dict:
+        """📊 สถิติการทำงาน"""
+        try:
+            total_attempts = self.analysis_count
+            success_rate = (self.successful_analysis / total_attempts * 100) if total_attempts > 0 else 0
+            block_rate = (self.duplicate_blocks / total_attempts * 100) if total_attempts > 0 else 0
+            
+            return {
+                'total_analysis_attempts': total_attempts,
+                'successful_analysis': self.successful_analysis,
+                'duplicate_blocks': self.duplicate_blocks,
+                'time_order_errors': self.time_order_errors,
+                'invalid_data_errors': self.invalid_data_errors,
+                'success_rate_percent': round(success_rate, 1),
+                'block_rate_percent': round(block_rate, 1),
+                'signatures_tracked': len(self.processed_signatures),
+                'volume_available': self.volume_available,
+                'avg_volume': round(self.avg_volume, 0) if self.volume_available else 0,
+                'cache_valid': self._is_cache_valid(),
+                'last_analysis': self.last_analysis_time.isoformat() if self.last_analysis_time != datetime.min else 'Never'
+            }
+            
+        except Exception as e:
+            return {'error': str(e)}
+    
+    def get_pattern_statistics(self) -> Dict:
+        """📈 สถิติ patterns"""
+        try:
+            if not self.pattern_success_rates:
+                return {'message': 'No pattern data available'}
+            
+            # เรียงตามจำนวนครั้งที่เกิด
+            sorted_patterns = sorted(
+                self.pattern_success_rates.items(),
+                key=lambda x: x[1]['occurrences'],
+                reverse=True
+            )
+            
+            pattern_stats = {}
+            for pattern_name, stats in sorted_patterns[:10]:  # Top 10
+                pattern_stats[pattern_name] = {
+                    'occurrences': stats['occurrences'],
+                    'avg_strength': round(stats['avg_strength'], 3),
+                    'total_strength': round(stats['total_strength'], 3)
+                }
+            
+            return {
+                'total_patterns_tracked': len(self.pattern_success_rates),
+                'pattern_history_count': len(self.pattern_history),
+                'top_patterns': pattern_stats,
+                'most_frequent': sorted_patterns[0][0] if sorted_patterns else 'none'
+            }
+            
+        except Exception as e:
+            return {'error': str(e)}
+    
+    def force_cache_refresh(self):
         """🔄 บังคับ refresh cache"""
         try:
             self.cached_analysis = None
             self.last_analysis_time = datetime.min
-            print(f"🔄 Analysis cache refreshed")
+            print(f"🔄 Analysis cache force refreshed")
         except Exception as e:
             print(f"❌ Cache refresh error: {e}")
+    
+    def clear_processed_signatures(self, confirm: bool = False):
+        """🗑️ ล้าง processed signatures"""
+        if not confirm:
+            print("❌ Signature clearing aborted: confirm=False")
+            return False
+        
+        try:
+            old_count = len(self.processed_signatures)
+            self.processed_signatures.clear()
+            print(f"🗑️ Cleared {old_count} processed signatures")
+            return True
+        except Exception as e:
+            print(f"❌ Clear signatures error: {e}")
+            return False
+    
+    def reset_statistics(self):
+        """🔄 รีเซ็ตสถิติ"""
+        try:
+            self.analysis_count = 0
+            self.duplicate_blocks = 0
+            self.successful_analysis = 0
+            self.time_order_errors = 0
+            self.invalid_data_errors = 0
+            self.pattern_history.clear()
+            self.pattern_success_rates.clear()
+            
+            print("🔄 Analysis statistics reset")
+            
+        except Exception as e:
+            print(f"❌ Reset statistics error: {e}")
+    
+    # ==========================================
+    # 🔧 CONFIGURATION & MANAGEMENT
+    # ==========================================
+    
+    def update_configuration(self, new_config: Dict):
+        """⚙️ อัพเดทการตั้งค่า"""
+        try:
+            # อัพเดทการตั้งค่าพื้นฐาน
+            if 'symbol' in new_config:
+                self.symbol = new_config['symbol']
+            
+            if 'cache_duration_seconds' in new_config:
+                self.cache_duration_seconds = max(1, int(new_config['cache_duration_seconds']))
+            
+            if 'doji_threshold' in new_config:
+                self.doji_threshold = max(0.01, min(0.2, float(new_config['doji_threshold'])))
+            
+            if 'strong_body_threshold' in new_config:
+                self.strong_body_threshold = max(0.3, min(0.9, float(new_config['strong_body_threshold'])))
+            
+            if 'volume_confirmation_enabled' in new_config:
+                self.volume_confirmation_enabled = bool(new_config['volume_confirmation_enabled'])
+            
+            if 'strict_time_checking' in new_config:
+                self.strict_time_checking = bool(new_config['strict_time_checking'])
+            
+            # Force cache refresh after config change
+            self.force_cache_refresh()
+            
+            print(f"⚙️ Configuration updated")
+            
+        except Exception as e:
+            print(f"❌ Configuration update error: {e}")
+    
+    def get_current_configuration(self) -> Dict:
+        """⚙️ ดึงการตั้งค่าปัจจุบัน"""
+        return {
+            'symbol': self.symbol,
+            'timeframe': 'M1',
+            'cache_duration_seconds': self.cache_duration_seconds,
+            'min_candles_required': self.min_candles_required,
+            'max_candles_lookback': self.max_candles_lookback,
+            'doji_threshold': self.doji_threshold,
+            'strong_body_threshold': self.strong_body_threshold,
+            'volume_confirmation_enabled': self.volume_confirmation_enabled,
+            'volume_fallback_enabled': self.volume_fallback_enabled,
+            'strict_time_checking': self.strict_time_checking,
+            'real_time_mode': self.real_time_mode,
+            'max_signature_history': self.max_signature_history
+        }
     
     def is_ready(self) -> bool:
         """✅ ตรวจสอบความพร้อม"""
@@ -1198,17 +1784,29 @@ class CandlestickAnalyzer:
         """ℹ️ ข้อมูล Candlestick Analyzer"""
         return {
             'name': 'Pure Candlestick Analyzer',
-            'version': '1.0.0',
+            'version': '2.0.0',
             'symbol': self.symbol,
-            'timeframe': 'M5',
-            'volume_available': self.volume_available,
-            'min_candles_required': self.min_candles_required,
-            'volume_lookback_periods': self.volume_lookback_periods,
-            'doji_threshold': self.doji_threshold,
-            'strong_body_threshold': self.strong_body_threshold,
-            'cache_duration_seconds': self.cache_duration_seconds
+            'timeframe': 'M1',
+            'features': [
+                'OHLC Data Collection',
+                'Pattern Recognition',
+                'Volume Analysis',
+                'Market Context Analysis',
+                'Real-time Processing',
+                'Duplicate Prevention',
+                'Performance Tracking',
+                'Persistence Integration'
+            ],
+            'status': {
+                'ready': self.is_ready(),
+                'volume_available': self.volume_available,
+                'cache_valid': self._is_cache_valid(),
+                'persistence_connected': self.persistence_manager is not None
+            },
+            'configuration': self.get_current_configuration(),
+            'statistics': self.get_analysis_statistics()
         }
-
+    
     def get_debug_info(self) -> Dict:
         """🔍 ข้อมูล debug สำหรับ troubleshooting"""
         try:
@@ -1217,7 +1815,7 @@ class CandlestickAnalyzer:
                     'is_ready': self.is_ready(),
                     'mt5_connected': self.mt5_connector.is_connected if self.mt5_connector else False,
                     'symbol': self.symbol,
-                    'timeframe': 'M5'
+                    'timeframe': 'M1'
                 },
                 'cache_info': {
                     'last_analysis_time': self.last_analysis_time.isoformat() if self.last_analysis_time != datetime.min else 'Never',
@@ -1226,104 +1824,73 @@ class CandlestickAnalyzer:
                     'cache_duration': self.cache_duration_seconds
                 },
                 'signature_tracking': {
-                    'processed_count': len(getattr(self, 'processed_signatures', set())),
+                    'processed_count': len(self.processed_signatures),
                     'max_history': self.max_signature_history,
-                    'recent_signatures': list(getattr(self, 'processed_signatures', set()))[-5:] if hasattr(self, 'processed_signatures') else []
+                    'recent_signatures': list(self.processed_signatures)[-5:] if self.processed_signatures else []
                 },
                 'performance': {
-                    'total_analysis': getattr(self, 'analysis_count', 0),
-                    'duplicate_blocks': getattr(self, 'duplicate_blocks', 0),
-                    'successful_analysis': getattr(self, 'successful_analysis', 0),
-                    'block_rate': f"{(getattr(self, 'duplicate_blocks', 0) / max(getattr(self, 'analysis_count', 1), 1) * 100):.1f}%"
+                    'total_analysis': self.analysis_count,
+                    'duplicate_blocks': self.duplicate_blocks,
+                    'successful_analysis': self.successful_analysis,
+                    'block_rate': round((self.duplicate_blocks / self.analysis_count * 100) if self.analysis_count > 0 else 0, 1),
+                    'success_rate': round((self.successful_analysis / self.analysis_count * 100) if self.analysis_count > 0 else 0, 1)
                 },
-                'volume_status': {
+                'volume_info': {
                     'available': self.volume_available,
-                    'history_count': len(self.volume_history)
+                    'history_count': len(self.volume_history),
+                    'avg_volume': round(self.avg_volume, 0) if self.volume_available else 0
+                },
+                'pattern_info': {
+                    'patterns_tracked': len(self.pattern_success_rates),
+                    'pattern_history': len(self.pattern_history)
+                },
+                'error_tracking': {
+                    'time_order_errors': self.time_order_errors,
+                    'invalid_data_errors': self.invalid_data_errors
                 }
             }
+            
         except Exception as e:
-            return {'error': str(e)}
-
-    def clear_processed_signatures(self):
-        """🗑️ ล้างประวัติการประมวลผล (สำหรับ debug)"""
+            return {'debug_error': str(e)}
+    
+    # ==========================================
+    # 💾 PERSISTENCE INTEGRATION
+    # ==========================================
+    
+    def save_to_persistence(self) -> bool:
+        """💾 บันทึกข้อมูลลง persistence"""
         try:
-            if hasattr(self, 'processed_signatures'):
-                old_count = len(self.processed_signatures)
-                self.processed_signatures.clear()
-                print(f"🗑️ Cleared {old_count} processed signatures")
-                
-            # รีเซ็ตเวลาติดตาม
-            self.last_analysis_time = datetime.min
-            self.last_analyzed_candle_time = datetime.min
+            if not self.persistence_manager:
+                return False
             
-            # รีเซ็ตสถิติ
-            self.analysis_count = 0
-            self.duplicate_blocks = 0 
-            self.successful_analysis = 0
+            # บันทึก processed signatures
+            success = self.persistence_manager.save_processed_signatures(self.processed_signatures)
             
-            print(f"✅ Analyzer reset completed")
-            return True
+            if success:
+                print("💾 Analyzer data saved to persistence")
+            
+            return success
             
         except Exception as e:
-            print(f"❌ Clear signatures error: {e}")
+            print(f"❌ Save to persistence error: {e}")
             return False
-
-    def force_analyze_current_candle(self) -> Optional[Dict]:
-        """🔧 บังคับวิเคราะห์แท่งปัจจุบัน (ข้าม duplicate check)"""
+    
+    def load_from_persistence(self) -> bool:
+        """📂 โหลดข้อมูลจาก persistence"""
         try:
-            print(f"🔧 FORCE ANALYSIS - bypassing duplicate check...")
+            if not self.persistence_manager:
+                return False
             
-            # สำรองและปิด duplicate check ชั่วคราว
-            original_processed = getattr(self, 'processed_signatures', set()).copy()
-            self.processed_signatures = set()  # ล้างชั่วคราว
+            # โหลด processed signatures
+            loaded_signatures = self.persistence_manager.load_processed_signatures()
             
-            # วิเคราะห์
-            result = self.get_current_analysis()
+            if loaded_signatures:
+                self.processed_signatures.update(loaded_signatures)
+                print(f"📂 Loaded {len(loaded_signatures)} processed signatures")
+                return True
             
-            # คืนค่า processed signatures
-            self.processed_signatures = original_processed
-            
-            if result:
-                print(f"✅ Force analysis completed")
-            else:
-                print(f"❌ Force analysis failed")
-            
-            return result
+            return False
             
         except Exception as e:
-            print(f"❌ Force analysis error: {e}")
-            return None
-    
-# ==========================================
-# 🧪 TESTING & VALIDATION
-# ==========================================
-
-def test_candlestick_analyzer(mt5_connector, config):
-    """🧪 ทดสอบ Candlestick Analyzer"""
-    print("🧪 Testing Candlestick Analyzer...")
-    print("=" * 50)
-    
-    analyzer = CandlestickAnalyzer(mt5_connector, config)
-    
-    if not analyzer.is_ready():
-        print("❌ Analyzer not ready")
-        return
-    
-    # ทดสอบการวิเคราะห์
-    analysis = analyzer.get_current_analysis()
-    
-    if analysis:
-        print("✅ Analysis successful!")
-        print(f"   Symbol: {analysis.get('symbol')}")
-        print(f"   Close: ${analysis.get('close', 0):.2f}")
-        print(f"   Color: {analysis.get('candle_color')}")
-        print(f"   Body ratio: {analysis.get('body_ratio', 0):.3f}")
-        print(f"   Price direction: {analysis.get('price_direction')}")
-        print(f"   Pattern: {analysis.get('pattern_name')}")
-        print(f"   Volume available: {analysis.get('volume_available')}")
-        print(f"   Analysis strength: {analysis.get('analysis_strength', 0):.2f}")
-    else:
-        print("❌ Analysis failed")
-    
-    print("=" * 50)
-    print("✅ Candlestick Analyzer test completed")
+            print(f"❌ Load from persistence error: {e}")
+            return False

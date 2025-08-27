@@ -35,9 +35,7 @@ from order_executor import OrderExecutor
 from performance_tracker import PerformanceTracker
 from risk_manager import RiskManager
 from data_persistence import create_persistence_manager, integrate_with_analyzer, integrate_with_generator
-
-# 🆕 Import Enhanced Position Monitor
-# from position_monitor_enhanced import PositionMonitor  # ใช้ version ใหม่
+from position_monitor import PositionMonitor
 
 class EnhancedPureCandlestickGUI:
     """
@@ -576,8 +574,7 @@ class EnhancedPureCandlestickGUI:
             self.order_executor = OrderExecutor(self.mt5_connector, self.config)
             
             # 🆕 Use Enhanced Position Monitor
-            # self.position_monitor = PositionMonitor(self.mt5_connector, self.config)  # Enhanced version
-            
+            self.position_monitor = PositionMonitor(self.mt5_connector, self.config)            
             self.performance_tracker = PerformanceTracker(self.config)
             self.risk_manager = RiskManager(self.mt5_connector, self.config)
             
@@ -593,7 +590,36 @@ class EnhancedPureCandlestickGUI:
             
         except Exception as e:
             self.log(f"❌ Component initialization error: {e}")
-    
+            
+    def execute_margin_optimization(self):
+        """🔧 Optimize Margin"""
+        if self.position_monitor:
+            self.position_monitor.execute_close_action({'action_type': 'margin_optimization'})
+        else:
+            messagebox.showwarning("Warning", "Position Monitor not initialized")
+
+    def execute_volume_balance(self):
+        """⚖️ Balance Volume"""  
+        if self.position_monitor:
+            self.position_monitor.execute_close_action({'action_type': 'volume_balance'})
+        else:
+            messagebox.showwarning("Warning", "Position Monitor not initialized")
+            
+    def execute_smart_recovery(self):
+        """🎯 Smart Recovery"""
+        if self.position_monitor:
+            self.position_monitor.execute_close_action({'action_type': 'lot_aware_recovery'})
+        else:
+            messagebox.showwarning("Warning", "Position Monitor not initialized")
+
+    def refresh_lot_analysis(self):
+        """🔄 Refresh Analysis"""
+        if self.position_monitor:
+            self.position_monitor.force_lot_aware_analysis()
+            self.log("🔄 Lot analysis refreshed")
+        else:
+            messagebox.showwarning("Warning", "Position Monitor not initialized")
+
     # ==========================================
     # 🎮 ENHANCED TRADING METHODS
     # ==========================================

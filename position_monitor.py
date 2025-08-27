@@ -18,6 +18,7 @@ import MetaTrader5 as mt5
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple
 import statistics
+import time
 
 class PositionMonitor:
     """
@@ -77,7 +78,7 @@ class PositionMonitor:
     
     def get_all_positions(self) -> List[Dict]:
         """
-        📊 ดึงออเดอร์ทั้งหมดที่เปิดอยู่
+        📊 ดึงออเดอร์ทั้งหมดที่เปิดอยู่ - FIXED Commission Error
         
         Returns:
             List[Dict]: รายการ positions พร้อมข้อมูลเพิ่มเติม
@@ -105,6 +106,12 @@ class PositionMonitor:
             
             for pos in raw_positions:
                 try:
+                    # 🔧 FIXED: ใช้ getattr เพื่อป้องกัน AttributeError
+                    commission = getattr(pos, 'commission', 0.0)  # ป้องกัน commission ไม่มี
+                    swap = getattr(pos, 'swap', 0.0)              # ป้องกัน swap ไม่มี
+                    comment = getattr(pos, 'comment', '')         # ป้องกัน comment ไม่มี
+                    magic = getattr(pos, 'magic', 0)              # ป้องกัน magic ไม่มี
+                    
                     # แปลงข้อมูลพื้นฐาน
                     position_data = {
                         'id': pos.ticket,
@@ -114,10 +121,10 @@ class PositionMonitor:
                         'price_open': float(pos.price_open),
                         'price_current': float(pos.price_current),
                         'profit': float(pos.profit),
-                        'swap': float(pos.swap),
-                        'commission': float(pos.commission),
-                        'magic': pos.magic,
-                        'comment': pos.comment,
+                        'swap': float(swap),           # 🔧 FIXED: ใช้ตัวแปรที่ได้จาก getattr
+                        'commission': float(commission), # 🔧 FIXED: ใช้ตัวแปรที่ได้จาก getattr
+                        'magic': magic,                # 🔧 FIXED
+                        'comment': comment,            # 🔧 FIXED
                         'time_open': datetime.fromtimestamp(pos.time),
                     }
                     
@@ -129,8 +136,9 @@ class PositionMonitor:
                     position_data['age_hours'] = age_timedelta.total_seconds() / 3600
                     position_data['age_minutes'] = age_timedelta.total_seconds() / 60
                     
-                    # คำนวณ total P&L (profit + swap + commission)
-                    position_data['total_pnl'] = position_data['profit'] + position_data['swap'] + position_data['commission']
+                    # 🔧 FIXED: คำนวณ total P&L อย่างปลอดภัย
+                    total_pnl = position_data['profit'] + position_data['swap'] + position_data['commission']
+                    position_data['total_pnl'] = round(total_pnl, 2)
                     
                     # คำนวณ pips/points movement
                     position_data['pips_movement'] = self._calculate_pips_movement(position_data)
@@ -140,21 +148,25 @@ class PositionMonitor:
                     
                     processed_positions.append(position_data)
                     
+                    print(f"💰 Position {pos.ticket}: ${total_pnl:.2f} P&L ({position_data['status']})")
+                    
                 except Exception as e:
-                    print(f"❌ Error processing position {pos.ticket}: {e}")
+                    # 🔧 FIXED: แสดง error ที่ละเอียดขึ้น
+                    ticket = getattr(pos, 'ticket', 'unknown')
+                    print(f"❌ Error processing position {ticket}: {e}")
                     continue
             
             # อัพเดท cache
             self.position_cache = {pos['id']: pos for pos in processed_positions}
             self.last_update_time = current_time
             
-            print(f"📊 Retrieved {len(processed_positions)} positions")
+            print(f"📊 Retrieved {len(processed_positions)} valid positions")
             return processed_positions
             
         except Exception as e:
             print(f"❌ Get positions error: {e}")
             return []
-    
+            
     def _classify_position_status(self, position: Dict) -> str:
         """🏷️ จำแนกสถานะของ Position"""
         try:

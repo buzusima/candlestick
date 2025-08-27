@@ -355,57 +355,93 @@ class RiskManager:
             }
     
     def _check_margin_levels(self) -> Dict:
-        """📊 ตรวจสอบระดับ Margin"""
+        """📊 ตรวจสอบระดับ Margin - FIXED"""
         try:
             account_info = self.mt5_connector.get_account_info()
             
             if not account_info:
                 return {
                     'can_trade': False,
-                    'warnings': ['Cannot check margin levels'],
+                    'warnings': ['Cannot get account information'],
                     'risk_contribution': 0.3
                 }
             
+            # 🔧 FIXED: ใช้ safe get กับ account info
             margin = account_info.get('margin', 0)
             equity = account_info.get('equity', 0)
+            free_margin = account_info.get('free_margin', 0)
+            balance = account_info.get('balance', 0)
             
             warnings = []
             restrictions = []
             can_trade = True
+            margin_level = 0
+            margin_risk = 0.3  # default risk
             
+            # print(f"📊 Account Info Debug:")
+            # print(f"   Margin: ${margin:.2f}")
+            # print(f"   Equity: ${equity:.2f}")
+            # print(f"   Free Margin: ${free_margin:.2f}")
+            # print(f"   Balance: ${balance:.2f}")
+            
+            # 🔧 FIXED: ตรวจสอบ margin calculation อย่างระมัดระวัง
             if margin > 0 and equity > 0:
                 margin_level = (equity / margin) * 100
+                print(f"📊 Margin Level: {margin_level:.1f}%")
                 
                 # ตรวจสอบระดับ margin
                 if margin_level <= self.stop_trading_margin_level:
                     warnings.append(f"CRITICAL: Margin level {margin_level:.1f}% <= {self.stop_trading_margin_level}%")
                     restrictions.append("STOP TRADING - Critical margin level")
                     can_trade = False
+                    margin_risk = 0.8  # ความเสี่ยงสูง
                     
                 elif margin_level <= self.min_margin_level:
                     warnings.append(f"LOW MARGIN: {margin_level:.1f}% <= {self.min_margin_level}%")
                     restrictions.append("Reduce position sizes")
+                    margin_risk = 0.6  # ความเสี่ยงปานกลาง
                     
                 elif margin_level <= self.min_margin_level * 1.5:
                     warnings.append(f"Margin warning: {margin_level:.1f}%")
+                    margin_risk = 0.4  # ความเสี่ยงต่ำ
+                else:
+                    margin_risk = 0.1  # ปกติ
+                    
+            elif margin == 0 and equity > 0:
+                # 🔧 FIXED: ไม่มี margin = ไม่มี positions เปิด
+                margin_level = float('inf')  # Infinite margin = ปลอดภัย
+                margin_risk = 0.1
+                print(f"📊 No margin used - no open positions")
                 
-                # คำนวณ risk contribution
-                margin_risk = max(0, (self.min_margin_level * 2 - margin_level) / self.min_margin_level)
-                margin_risk = min(margin_risk, 1.0) * 0.3  # 30% ของ risk score
+            elif equity > 0 and free_margin > 0:
+                # 🔧 FIXED: ลองคำนวณจาก free margin
+                used_margin = equity - free_margin
+                if used_margin > 0:
+                    margin_level = (equity / used_margin) * 100
+                    print(f"📊 Calculated margin level: {margin_level:.1f}% (from free margin)")
+                    margin_risk = max(0, (300 - margin_level) / 300) * 0.3  # ปรับตามสัดส่วน
+                else:
+                    margin_level = float('inf')
+                    margin_risk = 0.1
+                    print(f"📊 No positions or minimal margin usage")
+                    
             else:
-                margin_level = 0
-                margin_risk = 0.5  # ไม่ทราบข้อมูล = ความเสี่ยงปานกลาง
-                warnings.append("Cannot calculate margin level")
+                # 🔧 FIXED: ข้อมูลไม่เพียงพอ - ใช้ค่า conservative
+                warnings.append("Cannot calculate margin level - insufficient data")
+                margin_risk = 0.2  # ความเสี่ยงต่ำ แต่ไม่ใช่ศูนย์
+                print(f"⚠️ Cannot calculate margin level - using conservative risk")
             
             return {
                 'margin_check': 'completed',
-                'margin_level': locals().get('margin_level', 0),
+                'margin_level': margin_level,
                 'margin': margin,
                 'equity': equity,
+                'free_margin': free_margin,
+                'balance': balance,
                 'can_trade': can_trade,
                 'warnings': warnings,
                 'restrictions': restrictions,
-                'risk_contribution': locals().get('margin_risk', 0.3)
+                'risk_contribution': margin_risk
             }
             
         except Exception as e:
@@ -413,7 +449,7 @@ class RiskManager:
             return {
                 'can_trade': True,
                 'warnings': [f"Margin check error: {str(e)}"],
-                'risk_contribution': 0.3
+                'risk_contribution': 0.2  # ค่า conservative เมื่อเกิด error
             }
     
     def _check_loss_streak(self) -> Dict:

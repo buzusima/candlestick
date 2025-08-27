@@ -76,15 +76,17 @@ class SignalGenerator:
     
     def generate_signal(self, candlestick_data: Dict) -> Optional[Dict]:
         """
-        🎯 สร้าง Trading Signal จากข้อมูล Candlestick
-        
-        Args:
-            candlestick_data: ผลการวิเคราะห์จาก CandlestickAnalyzer
-            
-        Returns:
-            Dict: Signal data หรือ None ถ้าไม่มี signal
+        DEBUG VERSION: ดู logic ทุกขั้นตอน
         """
         try:
+            print(f"\n=== SIGNAL GENERATION DEBUG ===")
+            print(f"Input data:")
+            print(f"   Candle color: {candlestick_data.get('candle_color')}")
+            print(f"   Price direction: {candlestick_data.get('price_direction')}")
+            print(f"   Body ratio: {candlestick_data.get('body_ratio', 0):.3f}")
+            print(f"   Close: {candlestick_data.get('close', 0):.2f}")
+            print(f"   Previous close: {candlestick_data.get('previous_close', 0):.2f}")
+            
             # ตรวจสอบ rate limiting
             if not self._can_generate_signal():
                 return self._create_wait_signal("Rate limited or in cooldown")
@@ -94,10 +96,17 @@ class SignalGenerator:
                 return self._create_wait_signal("Invalid candlestick data")
             
             # วิเคราะห์เงื่อนไข BUY
+            print(f"\n--- BUY CONDITIONS CHECK ---")
             buy_signal_data = self._evaluate_buy_conditions(candlestick_data)
             
             # วิเคราะห์เงื่อนไข SELL
+            print(f"\n--- SELL CONDITIONS CHECK ---")
             sell_signal_data = self._evaluate_sell_conditions(candlestick_data)
+            
+            # แสดงผลลัพธ์
+            print(f"\n--- RESULTS ---")
+            print(f"BUY: passed={buy_signal_data.get('core_conditions_passed')}, strength={buy_signal_data.get('signal_strength', 0):.3f}")
+            print(f"SELL: passed={sell_signal_data.get('core_conditions_passed')}, strength={sell_signal_data.get('signal_strength', 0):.3f}")
             
             # ตัดสินใจ signal สุดท้าย
             final_signal = self._decide_final_signal(buy_signal_data, sell_signal_data, candlestick_data)
@@ -108,81 +117,88 @@ class SignalGenerator:
             return final_signal
             
         except Exception as e:
-            print(f"❌ Signal generation error: {e}")
+            print(f"Signal generation error: {e}")
             return self._create_wait_signal(f"Error: {str(e)}")
-    
+
     def _evaluate_buy_conditions(self, data: Dict) -> Dict:
         """
-        🟢 ประเมินเงื่อนไข BUY Signal
-        
-        Args:
-            data: ข้อมูล candlestick analysis
-            
-        Returns:
-            Dict: ผลการประเมิน BUY conditions
+        DEBUG BUY CONDITIONS
         """
         try:
+            print(f"🟢 Evaluating BUY conditions:")
+            
             conditions_met = {}
             total_score = 0.0
             max_score = 0.0
             
-            # 1. เช็ค Candle Color (Green)
+            # 1. Candle Color Check
             color_weight = self.signal_strength_config.get('candle_color_weight', 0.3)
             max_score += color_weight
+            candle_color = data.get('candle_color')
             
-            if data.get('candle_color') == 'green':
+            print(f"   1. Candle Color: {candle_color} (need: green)")
+            if candle_color == 'green':
                 conditions_met['candle_color'] = True
                 total_score += color_weight
-                print(f"✅ BUY: Green candle (+{color_weight})")
+                print(f"      ✅ PASS: Green candle (+{color_weight})")
             else:
                 conditions_met['candle_color'] = False
-                print(f"❌ BUY: Not green candle")
+                print(f"      ❌ FAIL: Not green candle")
             
-            # 2. เช็ค Price Direction (Higher Close)
+            # 2. Price Direction Check  
             direction_weight = self.signal_strength_config.get('price_direction_weight', 0.3)
             max_score += direction_weight
+            price_direction = data.get('price_direction')
+            current_close = data.get('close', 0)
+            previous_close = data.get('previous_close', 0)
             
-            if data.get('price_direction') == 'higher_close':
+            print(f"   2. Price Direction: {price_direction} (need: higher_close)")
+            print(f"      Current close: {current_close:.2f}")
+            print(f"      Previous close: {previous_close:.2f}")
+            print(f"      Difference: {current_close - previous_close:+.2f}")
+            
+            if price_direction == 'higher_close':
                 conditions_met['price_direction'] = True
                 total_score += direction_weight
-                print(f"✅ BUY: Higher close (+{direction_weight})")
+                print(f"      ✅ PASS: Higher close (+{direction_weight})")
             else:
                 conditions_met['price_direction'] = False
-                print(f"❌ BUY: Not higher close")
+                print(f"      ❌ FAIL: Not higher close")
             
-            # 3. เช็ค Body Ratio
+            # 3. Body Ratio Check
             body_weight = self.signal_strength_config.get('body_ratio_weight', 0.4)
             max_score += body_weight
-            
             body_ratio = data.get('body_ratio', 0)
             min_body_ratio = self.buy_conditions.get('min_body_ratio', 0.1)
             
+            print(f"   3. Body Ratio: {body_ratio:.3f} (need: >= {min_body_ratio})")
             if body_ratio >= min_body_ratio:
                 conditions_met['body_ratio'] = True
-                # คะแนนขึ้นอยู่กับขนาด body
-                body_score = min(body_ratio * 2, 1.0) * body_weight  # แปลงเป็น 0-1
+                body_score = min(body_ratio * 2, 1.0) * body_weight
                 total_score += body_score
-                print(f"✅ BUY: Body ratio {body_ratio:.3f} >= {min_body_ratio} (+{body_score:.3f})")
+                print(f"      ✅ PASS: Sufficient body ratio (+{body_score:.3f})")
             else:
                 conditions_met['body_ratio'] = False
-                print(f"❌ BUY: Body ratio {body_ratio:.3f} < {min_body_ratio}")
+                print(f"      ❌ FAIL: Body ratio too small")
             
-            # 4. เช็ค Volume Confirmation (Optional)
+            # 4. Volume Check (optional)
             volume_confirmation_required = self.buy_conditions.get('volume_confirmation', False)
-            volume_threshold = self.buy_conditions.get('volume_factor_threshold', 1.2)
+            print(f"   4. Volume Confirmation: required={volume_confirmation_required}")
             
             if volume_confirmation_required:
                 volume_factor = data.get('volume_factor', 1.0)
+                volume_threshold = self.buy_conditions.get('volume_factor_threshold', 1.2)
+                print(f"      Volume factor: {volume_factor:.2f} (need: >= {volume_threshold})")
                 
                 if volume_factor >= volume_threshold:
                     conditions_met['volume_confirmation'] = True
-                    print(f"✅ BUY: Volume confirmation {volume_factor:.2f} >= {volume_threshold}")
+                    print(f"      ✅ PASS: Volume confirmed")
                 else:
                     conditions_met['volume_confirmation'] = False
-                    print(f"❌ BUY: Volume confirmation {volume_factor:.2f} < {volume_threshold}")
+                    print(f"      ❌ FAIL: Volume not confirmed")
             else:
-                conditions_met['volume_confirmation'] = True  # ไม่บังคับ
-                print(f"ℹ️ BUY: Volume confirmation not required")
+                conditions_met['volume_confirmation'] = True
+                print(f"      ℹ️ SKIP: Volume confirmation not required")
             
             # คำนวณ signal strength
             signal_strength = total_score / max_score if max_score > 0 else 0
@@ -190,10 +206,15 @@ class SignalGenerator:
             # ตรวจสอบว่าเงื่อนไขหลักผ่านหรือไม่
             core_conditions_met = (
                 conditions_met.get('candle_color', False) and
-                conditions_met.get('price_direction', False) and  
+                conditions_met.get('price_direction', False) and
                 conditions_met.get('body_ratio', False) and
-                conditions_met.get('volume_confirmation', True)  # True ถ้าไม่บังคับ
+                conditions_met.get('volume_confirmation', True)
             )
+            
+            print(f"   SUMMARY:")
+            print(f"      Core conditions passed: {core_conditions_met}")
+            print(f"      Signal strength: {signal_strength:.3f}")
+            print(f"      Score: {total_score:.3f}/{max_score:.3f}")
             
             return {
                 'signal_type': 'BUY',
@@ -206,86 +227,93 @@ class SignalGenerator:
             }
             
         except Exception as e:
-            print(f"❌ BUY conditions evaluation error: {e}")
+            print(f"BUY conditions evaluation error: {e}")
             return {
                 'signal_type': 'BUY',
                 'core_conditions_passed': False,
                 'signal_strength': 0.0,
                 'error': str(e)
             }
-    
+
     def _evaluate_sell_conditions(self, data: Dict) -> Dict:
         """
-        🔴 ประเมินเงื่อนไข SELL Signal
-        
-        Args:
-            data: ข้อมูล candlestick analysis
-            
-        Returns:
-            Dict: ผลการประเมิน SELL conditions
+        DEBUG SELL CONDITIONS
         """
         try:
+            print(f"🔴 Evaluating SELL conditions:")
+            
             conditions_met = {}
             total_score = 0.0
             max_score = 0.0
             
-            # 1. เช็ค Candle Color (Red)
+            # 1. Candle Color Check
             color_weight = self.signal_strength_config.get('candle_color_weight', 0.3)
             max_score += color_weight
+            candle_color = data.get('candle_color')
             
-            if data.get('candle_color') == 'red':
+            print(f"   1. Candle Color: {candle_color} (need: red)")
+            if candle_color == 'red':
                 conditions_met['candle_color'] = True
                 total_score += color_weight
-                print(f"✅ SELL: Red candle (+{color_weight})")
+                print(f"      ✅ PASS: Red candle (+{color_weight})")
             else:
                 conditions_met['candle_color'] = False
-                print(f"❌ SELL: Not red candle")
+                print(f"      ❌ FAIL: Not red candle")
             
-            # 2. เช็ค Price Direction (Lower Close)
+            # 2. Price Direction Check  
             direction_weight = self.signal_strength_config.get('price_direction_weight', 0.3)
             max_score += direction_weight
+            price_direction = data.get('price_direction')
+            current_close = data.get('close', 0)
+            previous_close = data.get('previous_close', 0)
             
-            if data.get('price_direction') == 'lower_close':
+            print(f"   2. Price Direction: {price_direction} (need: lower_close)")
+            print(f"      Current close: {current_close:.2f}")
+            print(f"      Previous close: {previous_close:.2f}")
+            print(f"      Difference: {current_close - previous_close:+.2f}")
+            
+            if price_direction == 'lower_close':
                 conditions_met['price_direction'] = True
                 total_score += direction_weight
-                print(f"✅ SELL: Lower close (+{direction_weight})")
+                print(f"      ✅ PASS: Lower close (+{direction_weight})")
             else:
                 conditions_met['price_direction'] = False
-                print(f"❌ SELL: Not lower close")
+                print(f"      ❌ FAIL: Not lower close")
             
-            # 3. เช็ค Body Ratio
+            # 3. Body Ratio Check
             body_weight = self.signal_strength_config.get('body_ratio_weight', 0.4)
             max_score += body_weight
-            
             body_ratio = data.get('body_ratio', 0)
             min_body_ratio = self.sell_conditions.get('min_body_ratio', 0.1)
             
+            print(f"   3. Body Ratio: {body_ratio:.3f} (need: >= {min_body_ratio})")
             if body_ratio >= min_body_ratio:
                 conditions_met['body_ratio'] = True
-                # คะแนนขึ้นอยู่กับขนาด body
                 body_score = min(body_ratio * 2, 1.0) * body_weight
                 total_score += body_score
-                print(f"✅ SELL: Body ratio {body_ratio:.3f} >= {min_body_ratio} (+{body_score:.3f})")
+                print(f"      ✅ PASS: Sufficient body ratio (+{body_score:.3f})")
             else:
                 conditions_met['body_ratio'] = False
-                print(f"❌ SELL: Body ratio {body_ratio:.3f} < {min_body_ratio}")
+                print(f"      ❌ FAIL: Body ratio too small")
             
-            # 4. เช็ค Volume Confirmation (Optional)
+            # 4. Volume Check (optional)
             volume_confirmation_required = self.sell_conditions.get('volume_confirmation', False)
-            volume_threshold = self.sell_conditions.get('volume_factor_threshold', 1.2)
+            print(f"   4. Volume Confirmation: required={volume_confirmation_required}")
             
             if volume_confirmation_required:
                 volume_factor = data.get('volume_factor', 1.0)
+                volume_threshold = self.sell_conditions.get('volume_factor_threshold', 1.2)
+                print(f"      Volume factor: {volume_factor:.2f} (need: >= {volume_threshold})")
                 
                 if volume_factor >= volume_threshold:
                     conditions_met['volume_confirmation'] = True
-                    print(f"✅ SELL: Volume confirmation {volume_factor:.2f} >= {volume_threshold}")
+                    print(f"      ✅ PASS: Volume confirmed")
                 else:
                     conditions_met['volume_confirmation'] = False
-                    print(f"❌ SELL: Volume confirmation {volume_factor:.2f} < {volume_threshold}")
+                    print(f"      ❌ FAIL: Volume not confirmed")
             else:
-                conditions_met['volume_confirmation'] = True  # ไม่บังคับ
-                print(f"ℹ️ SELL: Volume confirmation not required")
+                conditions_met['volume_confirmation'] = True
+                print(f"      ℹ️ SKIP: Volume confirmation not required")
             
             # คำนวณ signal strength
             signal_strength = total_score / max_score if max_score > 0 else 0
@@ -295,8 +323,13 @@ class SignalGenerator:
                 conditions_met.get('candle_color', False) and
                 conditions_met.get('price_direction', False) and
                 conditions_met.get('body_ratio', False) and
-                conditions_met.get('volume_confirmation', True)  # True ถ้าไม่บังคับ
+                conditions_met.get('volume_confirmation', True)
             )
+            
+            print(f"   SUMMARY:")
+            print(f"      Core conditions passed: {core_conditions_met}")
+            print(f"      Signal strength: {signal_strength:.3f}")
+            print(f"      Score: {total_score:.3f}/{max_score:.3f}")
             
             return {
                 'signal_type': 'SELL',
@@ -309,17 +342,17 @@ class SignalGenerator:
             }
             
         except Exception as e:
-            print(f"❌ SELL conditions evaluation error: {e}")
+            print(f"SELL conditions evaluation error: {e}")
             return {
                 'signal_type': 'SELL',
                 'core_conditions_passed': False,
                 'signal_strength': 0.0,
                 'error': str(e)
             }
-    
+            
     def _decide_final_signal(self, buy_data: Dict, sell_data: Dict, candlestick_data: Dict) -> Dict:
         """
-        🤔 ตัดสินใจ Signal สุดท้าย
+        🤔 ตัดสินใจ Signal สุดท้าย - FIXED LOGIC
         
         Args:
             buy_data: ผลการประเมิน BUY conditions
@@ -338,33 +371,94 @@ class SignalGenerator:
             buy_strength = buy_data.get('signal_strength', 0)
             sell_strength = sell_data.get('signal_strength', 0)
             
-            # ตัดสินใจ signal
-            if buy_passed and buy_strength >= min_signal_strength:
-                if sell_passed and sell_strength > buy_strength:
-                    # SELL แข็งแกร่งกว่า
-                    chosen_signal = 'SELL'
-                    signal_strength = sell_strength
-                    signal_reasons = sell_data.get('reasons', [])
-                    conditions_detail = sell_data.get('conditions_met', {})
-                else:
-                    # BUY
+            print(f"🤔 Signal Decision Debug:")
+            print(f"   BUY: passed={buy_passed}, strength={buy_strength:.3f}")
+            print(f"   SELL: passed={sell_passed}, strength={sell_strength:.3f}")
+            print(f"   Min required: {min_signal_strength}")
+            
+            # 🔧 FIXED: ตัดสินใจแบบชัดเจน - ไม่ให้ทั้งสองผ่านพร้อมกัน
+            chosen_signal = None
+            signal_strength = 0
+            signal_reasons = []
+            conditions_detail = {}
+            
+            # กรณีที่ 1: ทั้ง BUY และ SELL ผ่าน (ไม่ควรเกิดขึ้น)
+            if buy_passed and sell_passed:
+                print(f"⚠️ WARNING: Both BUY and SELL conditions passed!")
+                print(f"   This indicates a logic error in condition evaluation")
+                
+                # เลือกตาม strength ที่สูงกว่า และต้องเกิน threshold มาก
+                if buy_strength > sell_strength and buy_strength >= min_signal_strength + 0.1:
                     chosen_signal = 'BUY'
                     signal_strength = buy_strength
                     signal_reasons = buy_data.get('reasons', [])
                     conditions_detail = buy_data.get('conditions_met', {})
-                    
+                    print(f"   → Chose BUY (stronger: {buy_strength:.3f} > {sell_strength:.3f})")
+                elif sell_strength > buy_strength and sell_strength >= min_signal_strength + 0.1:
+                    chosen_signal = 'SELL' 
+                    signal_strength = sell_strength
+                    signal_reasons = sell_data.get('reasons', [])
+                    conditions_detail = sell_data.get('conditions_met', {})
+                    print(f"   → Chose SELL (stronger: {sell_strength:.3f} > {buy_strength:.3f})")
+                else:
+                    # ความแรงใกล้เคียงกัน - ไม่ส่ง signal
+                    print(f"   → No signal (strengths too close: BUY={buy_strength:.3f}, SELL={sell_strength:.3f})")
+                    return self._create_wait_signal(
+                        f"Conflicting signals (BUY: {buy_strength:.2f}, SELL: {sell_strength:.2f})"
+                    )
+            
+            # กรณีที่ 2: เฉพาะ BUY ผ่าน
+            elif buy_passed and buy_strength >= min_signal_strength:
+                chosen_signal = 'BUY'
+                signal_strength = buy_strength
+                signal_reasons = buy_data.get('reasons', [])
+                conditions_detail = buy_data.get('conditions_met', {})
+                print(f"   → BUY Signal: {buy_strength:.3f} >= {min_signal_strength}")
+                
+            # กรณีที่ 3: เฉพาะ SELL ผ่าน  
             elif sell_passed and sell_strength >= min_signal_strength:
-                # SELL
                 chosen_signal = 'SELL'
                 signal_strength = sell_strength
                 signal_reasons = sell_data.get('reasons', [])
                 conditions_detail = sell_data.get('conditions_met', {})
+                print(f"   → SELL Signal: {sell_strength:.3f} >= {min_signal_strength}")
                 
+            # กรณีที่ 4: ไม่มี signal ไหนผ่าน
             else:
-                # ไม่มี signal
+                print(f"   → No signal: BUY={buy_strength:.3f}, SELL={sell_strength:.3f}, min={min_signal_strength}")
                 return self._create_wait_signal(
                     f"No strong signals (BUY: {buy_strength:.2f}, SELL: {sell_strength:.2f}, min: {min_signal_strength})"
                 )
+            
+            # 🔧 FIXED: Double-check กับ candlestick data
+            candle_color = candlestick_data.get('candle_color')
+            price_direction = candlestick_data.get('price_direction')
+            
+            # Sanity check: BUY signal ควรมีแท่งเขียวและปิดสูงกว่า
+            if chosen_signal == 'BUY':
+                if candle_color != 'green':
+                    print(f"   ❌ BUY signal but candle is {candle_color} - REJECTED")
+                    return self._create_wait_signal(f"BUY signal rejected: candle is {candle_color}")
+                    
+                if price_direction != 'higher_close':
+                    print(f"   ❌ BUY signal but price direction is {price_direction} - REJECTED")
+                    return self._create_wait_signal(f"BUY signal rejected: {price_direction}")
+                    
+            # Sanity check: SELL signal ควรมีแท่งแดงและปิดต่ำกว่า
+            elif chosen_signal == 'SELL':
+                if candle_color != 'red':
+                    print(f"   ❌ SELL signal but candle is {candle_color} - REJECTED")
+                    return self._create_wait_signal(f"SELL signal rejected: candle is {candle_color}")
+                    
+                if price_direction != 'lower_close':
+                    print(f"   ❌ SELL signal but price direction is {price_direction} - REJECTED")
+                    return self._create_wait_signal(f"SELL signal rejected: {price_direction}")
+            
+            # ถ้าผ่าน sanity check แล้ว
+            print(f"✅ Signal APPROVED: {chosen_signal}")
+            print(f"   Candle: {candle_color}")
+            print(f"   Direction: {price_direction}")
+            print(f"   Strength: {signal_strength:.3f}")
             
             # สร้าง signal data สมบูรณ์
             signal_data = {
@@ -381,12 +475,12 @@ class SignalGenerator:
                 'sell_strength': sell_strength,
                 
                 # ข้อมูล candlestick ที่เกี่ยวข้อง
-                'candle_color': candlestick_data.get('candle_color'),
+                'candle_color': candle_color,
                 'body_ratio': candlestick_data.get('body_ratio'),
-                'price_direction': candlestick_data.get('price_direction'),
+                'price_direction': price_direction,
                 'pattern_name': candlestick_data.get('pattern_name'),
                 'volume_factor': candlestick_data.get('volume_factor'),
-                'close': candlestick_data.get('close'),  # สำหรับ execution
+                'close': candlestick_data.get('close'),
                 
                 # การจัด lot size ที่แนะนำ
                 'recommended_lot_multiplier': self._calculate_lot_multiplier(signal_strength),
@@ -394,16 +488,20 @@ class SignalGenerator:
                 # Metadata
                 'symbol': candlestick_data.get('symbol', self.candlestick_analyzer.symbol),
                 'timeframe': 'M5',
-                'signal_id': f"{chosen_signal}_{datetime.now().strftime('%H%M%S')}"
+                'signal_id': f"{chosen_signal}_{datetime.now().strftime('%H%M%S')}",
+                
+                # 🔧 FIXED: เพิ่ม validation flags
+                'passed_sanity_check': True,
+                'candle_direction_match': True
             }
             
-            print(f"🎯 SIGNAL GENERATED: {chosen_signal} (Strength: {signal_strength:.2f})")
+            print(f"🎯 FINAL SIGNAL: {chosen_signal} (Strength: {signal_strength:.3f})")
             return signal_data
             
         except Exception as e:
             print(f"❌ Final signal decision error: {e}")
             return self._create_wait_signal(f"Decision error: {str(e)}")
-    
+            
     # ==========================================
     # ✅ CONDITION EVALUATION HELPERS
     # ==========================================

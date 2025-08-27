@@ -394,8 +394,54 @@ class MT5Connector:
         ]
     
     def get_account_info(self) -> Dict:
-        """ดึงข้อมูล account ปัจจุบัน"""
-        return self.account_info.copy()
+        """ดึงข้อมูลบัญชีปัจจุบัน - FIXED Margin Calculation"""
+        try:
+            if not self.is_connected:
+                print(f"❌ MT5 not connected")
+                return {}
+            
+            # ดึงข้อมูลจาก MT5 API
+            account_info = mt5.account_info()
+            if account_info is None:
+                print(f"❌ Cannot get account info from MT5")
+                return {}
+            
+            # 🔧 FIXED: ใช้ attribute names ที่ถูกต้อง
+            account_data = {
+                'login': getattr(account_info, 'login', 0),
+                'balance': float(getattr(account_info, 'balance', 0.0)),
+                'equity': float(getattr(account_info, 'equity', 0.0)),
+                'margin': float(getattr(account_info, 'margin', 0.0)),
+                'free_margin': float(getattr(account_info, 'margin_free', 0.0)),
+                'margin_level': float(getattr(account_info, 'margin_level', 0.0)),
+                'leverage': int(getattr(account_info, 'leverage', 100)),
+                'company': str(getattr(account_info, 'company', 'Unknown')),
+                'currency': str(getattr(account_info, 'currency', 'USD')),
+                'name': str(getattr(account_info, 'name', 'Trading Account')),
+                'server': str(getattr(account_info, 'server', 'Unknown'))
+            }
+            
+            # 🔧 FIXED: คำนวณ margin level ถ้า MT5 ไม่ให้มา
+            if account_data['margin_level'] == 0.0 and account_data['margin'] > 0:
+                account_data['margin_level'] = (account_data['equity'] / account_data['margin']) * 100
+            elif account_data['margin'] == 0:
+                account_data['margin_level'] = float('inf')  # ไม่มี positions = margin level สูงสุด
+            
+            # Debug info
+            print(f"📊 Account Info Retrieved:")
+            print(f"   Login: {account_data['login']}")
+            print(f"   Balance: ${account_data['balance']:,.2f}")
+            print(f"   Equity: ${account_data['equity']:,.2f}")
+            print(f"   Margin: ${account_data['margin']:,.2f}")
+            print(f"   Free Margin: ${account_data['free_margin']:,.2f}")
+            print(f"   Margin Level: {account_data['margin_level']:.2f}%")
+            print(f"   Leverage: 1:{account_data['leverage']}")
+            
+            return account_data
+            
+        except Exception as e:
+            print(f"❌ Get account info error: {e}")
+            return {}
     
     def get_gold_symbol(self) -> Optional[str]:
         """ดึงสัญลักษณ์ทองคำที่ตรวจจับได้"""

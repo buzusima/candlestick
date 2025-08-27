@@ -264,49 +264,17 @@ class OrderExecutor:
     
     def _prepare_order_request(self, order_type: str, lot_size: float, signal_data: Dict) -> Optional[Dict]:
         """
-        📋 เตรียม Order Request สำหรับ MT5 (COMPLETE FIXED)
-        
-        Args:
-            order_type: 'BUY' หรือ 'SELL'
-            lot_size: ขนาด lot
-            signal_data: ข้อมูล signal
-            
-        Returns:
-            Dict: Order request object สำหรับ mt5.order_send()
+        📋 เตรียม Order Request - DEBUG PRICE ISSUE
         """
         try:
             print(f"🔧 Preparing {order_type} order request...")
+            print(f"🔍 DEBUG: Signal data keys: {list(signal_data.keys())}")
+            print(f"🔍 DEBUG: Signal close price: {signal_data.get('close', 'NOT FOUND')}")
             
             # ตรวจสอบ symbol
             symbol_info = mt5.symbol_info(self.symbol)
             if symbol_info is None:
-                print(f"❌ Symbol {self.symbol} not found, trying alternatives...")
-                
-                # ลองหา alternative symbols
-                alternative_symbols = ["XAUUSD", "GOLD", "#GOLD", "XAUUSD.", "XAU/USD"]
-                for alt_symbol in alternative_symbols:
-                    alt_info = mt5.symbol_info(alt_symbol)
-                    if alt_info is not None:
-                        print(f"💡 Found alternative symbol: {alt_symbol}")
-                        self.symbol = alt_symbol
-                        symbol_info = alt_info
-                        break
-                
-                if symbol_info is None:
-                    print(f"❌ No valid gold symbol found")
-                    return None
-            
-            # ทำให้ symbol visible
-            if not symbol_info.visible:
-                print(f"🔧 Making symbol {self.symbol} visible...")
-                if not mt5.symbol_select(self.symbol, True):
-                    print(f"❌ Cannot make symbol visible")
-                    return None
-                time.sleep(0.2)
-            
-            # ตรวจสอบ trade permissions
-            if hasattr(symbol_info, 'trade_mode') and symbol_info.trade_mode == 0:
-                print(f"❌ Trading disabled for symbol {self.symbol}")
+                print(f"❌ Symbol {self.symbol} not found")
                 return None
             
             # ดึงราคาปัจจุบัน
@@ -315,72 +283,79 @@ class OrderExecutor:
                 print(f"❌ Cannot get tick for {self.symbol}")
                 return None
             
-            if tick.bid <= 0 or tick.ask <= 0:
-                print(f"❌ Invalid prices: Bid {tick.bid}, Ask {tick.ask}")
+            print(f"💰 Current prices: Bid ${tick.bid:.2f}, Ask ${tick.ask:.2f}")
+            print(f"🔍 DEBUG: tick.bid type = {type(tick.bid)}, value = {tick.bid}")
+            print(f"🔍 DEBUG: tick.ask type = {type(tick.ask)}, value = {tick.ask}")
+            
+            # กำหนดราคาและประเภทออเดอร์
+            if order_type == 'BUY':
+                action = mt5.TRADE_ACTION_DEAL
+                order_type_mt5 = mt5.ORDER_TYPE_BUY
+                price = float(tick.ask)  # 🔧 แปลงเป็น float อย่างชัดเจน
+                print(f"🔧 BUY price set to: ${price:.5f}")
+            elif order_type == 'SELL':
+                action = mt5.TRADE_ACTION_DEAL  
+                order_type_mt5 = mt5.ORDER_TYPE_SELL
+                price = float(tick.bid)  # 🔧 แปลงเป็น float อย่างชัดเจน
+                print(f"🔧 SELL price set to: ${price:.5f}")
+            else:
+                print(f"❌ Invalid order type: {order_type}")
                 return None
             
-            print(f"💰 Current prices: Bid ${tick.bid:.2f}, Ask ${tick.ask:.2f}")
+            # 🔧 ตรวจสอบราคาก่อนใส่ request
+            if price <= 0:
+                print(f"❌ Invalid price: {price}")
+                return None
             
-            # ปรับ lot size ตาม symbol requirements
+            # ปรับ lot size
             min_volume = symbol_info.volume_min
             max_volume = symbol_info.volume_max  
             volume_step = symbol_info.volume_step
             
-            print(f"📏 Volume limits: Min {min_volume}, Max {max_volume}, Step {volume_step}")
-            
-            # ปรับ lot size
             if lot_size < min_volume:
                 lot_size = min_volume
-                print(f"🔧 Lot adjusted to minimum: {lot_size}")
             elif lot_size > max_volume:
                 lot_size = max_volume
-                print(f"🔧 Lot adjusted to maximum: {lot_size}")
             
             # ปัดตาม step
             if volume_step > 0:
                 steps = round(lot_size / volume_step)
                 lot_size = steps * volume_step
                 lot_size = max(min_volume, lot_size)
-                print(f"🔧 Lot rounded to step: {lot_size}")
             
-            # กำหนดราคาและประเภทออเดอร์
-            if order_type == 'BUY':
-                action = mt5.TRADE_ACTION_DEAL
-                order_type_mt5 = mt5.ORDER_TYPE_BUY
-                price = tick.ask
-            elif order_type == 'SELL':
-                action = mt5.TRADE_ACTION_DEAL  
-                order_type_mt5 = mt5.ORDER_TYPE_SELL
-                price = tick.bid
-            else:
-                print(f"❌ Invalid order type: {order_type}")
-                return None
+            print(f"📏 Final lot size: {lot_size}")
             
-            # สร้าง order request (แบบง่ายที่สุด)
+            # สร้าง order request
             order_request = {
                 'action': action,
                 'symbol': self.symbol,
-                'volume': lot_size,
+                'volume': float(lot_size),  # 🔧 แปลงเป็น float
                 'type': order_type_mt5,
-                'price': price,
+                'price': float(price),      # 🔧 แปลงเป็น float อย่างชัดเจน
                 'deviation': self.max_slippage,
                 'magic': self._generate_magic_number(signal_data),
                 'comment': self._generate_order_comment(signal_data)
             }
             
             print(f"📋 Order request prepared:")
-            print(f"   Symbol: {self.symbol}")
+            print(f"   Symbol: {order_request['symbol']}")
             print(f"   Action: {order_type}")
-            print(f"   Price: ${price:.2f}")
-            print(f"   Volume: {lot_size} lots")
+            print(f"   Price: ${order_request['price']:.5f}")  # แสดง 5 ตำแหน่ง
+            print(f"   Volume: {order_request['volume']} lots")
             print(f"   Magic: {order_request['magic']}")
+            print(f"   Type: {order_request['type']}")
+            
+            # 🔧 Final validation
+            if order_request['price'] <= 0:
+                print(f"❌ CRITICAL: Final price is {order_request['price']}")
+                return None
             
             return order_request
             
         except Exception as e:
             print(f"❌ Order request preparation error: {e}")
             return None
-    
+        
     def _explain_error_code(self, retcode: int):
         """🔍 อธิบาย MT5 Error Codes"""
         error_codes = {

@@ -68,7 +68,8 @@ class PureCandlestickGUI:
         self.position_monitor = None
         self.performance_tracker = None
         self.risk_manager = None
-        
+        self.persistence_manager = None
+
         # 🔧 FIXED: Initialize GUI FIRST
         self.setup_gui()
         
@@ -78,7 +79,8 @@ class PureCandlestickGUI:
         # Log system start
         self.log("🚀 Pure Candlestick Trading System Started")
         self.log("🔍 Scanning for MT5 terminals...")
-        
+        self.initialize_persistence()
+
         # Auto scan for MT5 installations
         self.scan_mt5_terminals()
     
@@ -437,23 +439,63 @@ class PureCandlestickGUI:
     # 🕯️ PURE CANDLESTICK METHODS (ใหม่)
     # ==========================================
     
+    def initialize_persistence(self):
+        """🆕 เริ่มต้น Data Persistence Manager"""
+        try:
+            self.log("💾 Initializing Data Persistence Manager...")
+            
+            # สร้าง persistence manager
+            self.persistence_manager = create_persistence_manager()
+            
+            # โหลดข้อมูลเก่า (ถ้ามี)
+            session_info = self.persistence_manager.load_session_info()
+            if session_info:
+                self.log(f"📂 Loaded previous session data")
+                
+            # โหลด performance data เก่า
+            performance_data = self.persistence_manager.load_performance_data()
+            if performance_data:
+                self.log(f"📈 Loaded performance history: {performance_data.get('total_signals', 0)} signals")
+            
+            self.log("✅ Data Persistence Manager ready")
+            
+        except Exception as e:
+            self.log(f"❌ Persistence initialization error: {e}")
+            self.persistence_manager = None
+
     def initialize_trading_components(self):
-        """เริ่มต้น Pure Candlestick Trading Components"""
+        """เริ่มต้น Pure Candlestick Trading Components + Persistence"""
         try:
             self.log("🕯️ Initializing Pure Candlestick components...")
             
-            # เช็คว่าเชื่อมต่อ MT5 แล้วหรือยัง
             if not self.mt5_connector.is_connected:
                 self.log("❌ MT5 not connected - cannot initialize components")
                 return
             
-            # Initialize components ตามลำดับ
+            # Initialize components ตามลำดับ (เดิม)
             self.candlestick_analyzer = CandlestickAnalyzer(self.mt5_connector, self.config)
             self.signal_generator = SignalGenerator(self.candlestick_analyzer, self.config)
             self.order_executor = OrderExecutor(self.mt5_connector, self.config)
             self.position_monitor = PositionMonitor(self.mt5_connector, self.config)
             self.performance_tracker = PerformanceTracker(self.config)
             self.risk_manager = RiskManager(self.mt5_connector, self.config)
+            
+            # 🆕 NEW: ผูก Persistence เข้ากับ components
+            if self.persistence_manager:
+                self.log("🔗 Integrating persistence with components...")
+                
+                # ผูกเข้ากับ CandlestickAnalyzer (เก็บ processed signatures)
+                integrate_with_analyzer(self.candlestick_analyzer, self.persistence_manager)
+                
+                # ผูกเข้ากับ SignalGenerator (เก็บ signal history)  
+                integrate_with_generator(self.signal_generator, self.persistence_manager)
+                
+                # โหลด performance data เก่าเข้า performance_tracker
+                performance_data = self.persistence_manager.load_performance_data()
+                if performance_data and hasattr(self.performance_tracker, 'load_previous_data'):
+                    self.performance_tracker.load_previous_data(performance_data)
+                
+                self.log("✅ Persistence integration completed")
             
             self.log("✅ All Pure Candlestick components initialized")
             
@@ -824,7 +866,7 @@ class PureCandlestickGUI:
         update_thread.start()
     
     def on_closing(self):
-        """เมื่อปิดโปรแกรม"""
+        """เมื่อปิดโปรแกรม - บันทึกข้อมูลก่อนปิด"""
         try:
             self.log("🔒 Shutting down Pure Candlestick Trading System...")
             
@@ -833,8 +875,30 @@ class PureCandlestickGUI:
                 self.stop_trading()
                 time.sleep(1)  # รอให้หยุด
             
+            # 🆕 NEW: บันทึกข้อมูลก่อนปิด
+            if self.persistence_manager:
+                self.log("💾 Saving session data...")
+                
+                # เตรียมข้อมูล session
+                session_data = {
+                    'last_shutdown': datetime.now().isoformat(),
+                    'trading_was_active': self.is_trading,
+                    'mt5_connected': self.mt5_connector.is_connected if self.mt5_connector else False,
+                    'total_runtime_minutes': 0  # คำนวณได้จาก start time
+                }
+                
+                # บันทึก session info
+                self.persistence_manager.save_session_info(session_data)
+                
+                # บันทึก performance data (ถ้ามี)
+                if self.performance_tracker:
+                    performance_data = self.performance_tracker.get_current_metrics()
+                    self.persistence_manager.save_performance_data(performance_data)
+                
+                self.log("✅ Session data saved")
+            
             # ตัดการเชื่อมต่อ
-            if self.mt5_connector.is_connected:
+            if self.mt5_connector and self.mt5_connector.is_connected:
                 self.disconnect_mt5()
             
             # ปิดโปรแกรม
@@ -843,6 +907,46 @@ class PureCandlestickGUI:
         except Exception as e:
             print(f"Shutdown error: {e}")
             self.root.destroy()
+
+    def show_persistence_stats(self):
+        """แสดงสถิติการใช้ Data Persistence"""
+        try:
+            if not self.persistence_manager:
+                messagebox.showinfo("Info", "Data Persistence not initialized")
+                return
+            
+            stats = self.persistence_manager.get_storage_stats()
+            
+            # สร้าง window แสดงสถิติ
+            stats_window = tk.Toplevel(self.root)
+            stats_window.title("💾 Data Persistence Statistics")
+            stats_window.geometry("500x400")
+            stats_window.configure(bg="#2a2a2a")
+            
+            # แสดงสถิติ
+            stats_text = scrolledtext.ScrolledText(
+                stats_window, font=("Consolas", 10),
+                bg="#1a1a1a", fg="#00aaff", wrap="word"
+            )
+            stats_text.pack(fill="both", expand=True, padx=10, pady=10)
+            
+            # เขียนสถิติลงไป
+            stats_text.insert("end", "💾 DATA PERSISTENCE STATISTICS\n")
+            stats_text.insert("end", "="*40 + "\n\n")
+            stats_text.insert("end", f"📁 Data Directory: {stats['data_directory']}\n\n")
+            
+            for file_name, file_info in stats['files'].items():
+                if file_info['exists']:
+                    stats_text.insert("end", f"📄 {file_name.upper()}:\n")
+                    stats_text.insert("end", f"   Size: {file_info['size_kb']} KB\n")
+                    stats_text.insert("end", f"   Modified: {file_info['last_modified']}\n\n")
+                else:
+                    stats_text.insert("end", f"📄 {file_name.upper()}: Not found\n\n")
+            
+            stats_text.config(state="disabled")
+            
+        except Exception as e:
+            self.log(f"❌ Show persistence stats error: {e}")
 
 # ==========================================
 # 🚀 APPLICATION ENTRY POINT

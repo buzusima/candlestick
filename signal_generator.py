@@ -80,10 +80,15 @@ class SignalGenerator:
     
     def generate_signal(self, candlestick_data: Dict) -> Optional[Dict]:
         """
-        🎯 สร้าง Signal - SIGNATURE TRACKING VERSION
+        🎯 สร้าง Signal - เพิ่มเงื่อนไข Body Size Comparison
+        
+        เงื่อนไขใหม่:
+        - BUY: Close > Previous Close + Body >= min_ratio + Body > Previous Body
+        - SELL: Close < Previous Close + Body >= min_ratio + Body > Previous Body  
+        - เนื้อเทียนต้องใหญ่กว่าแท่งก่อนหน้า
         """
         try:
-            print(f"\n=== 🎯 SIGNAL GENERATION (SIGNATURE TRACKING) ===")
+            print(f"\n=== 🎯 SIGNAL GENERATION (BODY COMPARISON) ===")
             
             # ดึงลายเซ็นแท่งปัจจุบัน
             candle_signature = candlestick_data.get('candle_signature')
@@ -97,72 +102,126 @@ class SignalGenerator:
             
             candle_time = candlestick_data.get('candle_time')
             print(f"🆕 New signature for signal: {candle_time.strftime('%H:%M:%S') if candle_time else 'Unknown'}")
-            print(f"   Signature: {candle_signature}")
             
-            # ประมวลผล signal ตามปกติ
-            candle_color = candlestick_data.get('candle_color')
+            # ดึงข้อมูล OHLC ปัจจุบันและก่อนหน้า
+            current_open = float(candlestick_data.get('open', 0))
+            current_high = float(candlestick_data.get('high', 0))
+            current_low = float(candlestick_data.get('low', 0))
             current_close = float(candlestick_data.get('close', 0))
             previous_close = float(candlestick_data.get('previous_close', 0))
-            body_ratio = float(candlestick_data.get('body_ratio', 0))
             
-            # เช็คเงื่อนไข
-            is_green_candle = (candle_color == 'green')
-            is_red_candle = (candle_color == 'red')
+            # คำนวณ body size ปัจจุบันและก่อนหน้า
+            current_body_size = abs(current_close - current_open)
+            current_candle_range = current_high - current_low
+            current_body_ratio = current_body_size / current_candle_range if current_candle_range > 0 else 0
+            
+            # 🆕 NEW: ดึงข้อมูลแท่งก่อนหน้าสำหรับเปรียบเทียบ body
+            previous_open = candlestick_data.get('previous_open', previous_close)  # fallback
+            previous_high = candlestick_data.get('previous_high', previous_close)
+            previous_low = candlestick_data.get('previous_low', previous_close)
+            
+            # คำนวณ body size แท่งก่อนหน้า
+            previous_body_size = abs(previous_close - previous_open) if previous_open else 0
+            previous_candle_range = (previous_high - previous_low) if (previous_high and previous_low) else 0.01
+            previous_body_ratio = previous_body_size / previous_candle_range if previous_candle_range > 0 else 0
+            
+            print(f"📊 BODY SIZE COMPARISON:")
+            print(f"   Current Body: {current_body_size:.4f} (ratio: {current_body_ratio:.3f})")
+            print(f"   Previous Body: {previous_body_size:.4f} (ratio: {previous_body_ratio:.3f})")
+            print(f"   Body Size Diff: {current_body_size - previous_body_size:+.4f}")
+            
+            # เงื่อนไขการเปรียบเทียบราคา
             is_higher_close = (current_close > previous_close)
             is_lower_close = (current_close < previous_close)
             
+            # เงื่อนไขพื้นฐาน
             min_body_ratio = self.buy_conditions.get('min_body_ratio', 0.1)
-            body_sufficient = body_ratio >= min_body_ratio
+            body_sufficient = current_body_ratio >= min_body_ratio
             
             min_price_change = 0.01
             price_change_sufficient = abs(current_close - previous_close) >= min_price_change
             
-            # ตัดสินใจ signal
-            buy_valid = is_green_candle and is_higher_close
-            sell_valid = is_red_candle and is_lower_close
+            # 🆕 NEW: เงื่อนไข Body Size ต้องใหญ่กว่าแท่งก่อน
+            body_bigger_than_previous = current_body_size > previous_body_size
             
-            print(f"🔍 Signal Conditions:")
-            print(f"   BUY Valid: {buy_valid} (green: {is_green_candle}, higher: {is_higher_close})")
-            print(f"   SELL Valid: {sell_valid} (red: {is_red_candle}, lower: {is_lower_close})")
-            print(f"   Body Sufficient: {body_sufficient} ({body_ratio:.3f} >= {min_body_ratio})")
+            # เงื่อนไขเพิ่มเติม: Body ต้องใหญ่กว่าอย่างน้อย 20%
+            min_body_increase_percent = 0.2  # 20%
+            body_increase_sufficient = current_body_size > (previous_body_size * (1 + min_body_increase_percent))
+            
+            print(f"🔍 ENHANCED Signal Conditions:")
+            print(f"   Higher Close: {is_higher_close} ({current_close:.2f} > {previous_close:.2f})")
+            print(f"   Lower Close: {is_lower_close} ({current_close:.2f} < {previous_close:.2f})")
+            print(f"   Body Sufficient: {body_sufficient} ({current_body_ratio:.3f} >= {min_body_ratio})")
             print(f"   Price Change OK: {price_change_sufficient}")
+            print(f"   Body > Previous: {body_bigger_than_previous}")
+            print(f"   Body Increase 20%+: {body_increase_sufficient}")
             
+            # ตัดสินใจ signal
             signal_action = 'WAIT'
             signal_strength = 0.0
             signal_reasons = []
             
-            if buy_valid and body_sufficient and price_change_sufficient:
-                signal_action = 'BUY'
-                signal_strength = min(body_ratio * 2, 1.0)
-                signal_reasons.append("🟢 Green candle with higher close")
+            # 🔧 ENHANCED: เงื่อนไขใหม่ (เพิ่ม body comparison)
+            if (is_higher_close and body_sufficient and price_change_sufficient and 
+                body_bigger_than_previous and body_increase_sufficient):
                 
-            elif sell_valid and body_sufficient and price_change_sufficient:
+                signal_action = 'BUY'
+                
+                # คำนวณ strength จาก body comparison
+                body_strength = min(current_body_size / max(previous_body_size, 0.0001), 3.0)  # สูงสุด 3x
+                price_strength = min(abs(current_close - previous_close) / 5.0, 1.0)  # normalize
+                
+                signal_strength = min((current_body_ratio + body_strength + price_strength) / 3, 1.0)
+                
+                signal_reasons.append(f"📈 Price increased: ${previous_close:.2f} → ${current_close:.2f}")
+                signal_reasons.append(f"💪 Current Body: {current_body_size:.4f} > Previous: {previous_body_size:.4f}")
+                signal_reasons.append(f"📊 Body Ratio: {current_body_ratio*100:.1f}%")
+                signal_reasons.append(f"🚀 Body Growth: {((current_body_size/max(previous_body_size,0.0001)-1)*100):+.1f}%")
+                
+            elif (is_lower_close and body_sufficient and price_change_sufficient and 
+                body_bigger_than_previous and body_increase_sufficient):
+                
                 signal_action = 'SELL'
-                signal_strength = min(body_ratio * 2, 1.0)
-                signal_reasons.append("🔴 Red candle with lower close")
+                
+                # คำนวณ strength จาก body comparison  
+                body_strength = min(current_body_size / max(previous_body_size, 0.0001), 3.0)
+                price_strength = min(abs(current_close - previous_close) / 5.0, 1.0)
+                
+                signal_strength = min((current_body_ratio + body_strength + price_strength) / 3, 1.0)
+                
+                signal_reasons.append(f"📉 Price decreased: ${previous_close:.2f} → ${current_close:.2f}")
+                signal_reasons.append(f"💪 Current Body: {current_body_size:.4f} > Previous: {previous_body_size:.4f}")
+                signal_reasons.append(f"📊 Body Ratio: {current_body_ratio*100:.1f}%")
+                signal_reasons.append(f"🚀 Body Growth: {((current_body_size/max(previous_body_size,0.0001)-1)*100):+.1f}%")
             
             else:
                 reasons = []
-                if not (buy_valid or sell_valid):
-                    reasons.append("No valid pattern")
+                if not (is_higher_close or is_lower_close):
+                    reasons.append("No clear price direction")
                 if not body_sufficient:
-                    reasons.append(f"Body too small ({body_ratio*100:.1f}%)")
+                    reasons.append(f"Body too small ({current_body_ratio*100:.1f}%)")
                 if not price_change_sufficient:
-                    reasons.append(f"Price change too small")
+                    reasons.append(f"Price change insufficient")
+                if not body_bigger_than_previous:
+                    reasons.append(f"Body not bigger than previous")
+                if not body_increase_sufficient:
+                    reasons.append(f"Body increase < 20%")
                 return self._create_wait_signal("; ".join(reasons))
             
             # ตรวจสอบ minimum strength
             min_strength = self.signal_strength_config.get('min_signal_strength', 0.6)
             if signal_strength < min_strength:
-                return self._create_wait_signal(f"Signal weak ({signal_strength:.2f})")
+                return self._create_wait_signal(f"Signal weak ({signal_strength:.2f} < {min_strength})")
             
             # บันทึกว่าส่ง signal สำหรับลายเซ็นนี้แล้ว
             self._mark_signal_sent_for_signature(candle_signature)
             
-            print(f"✅ SIGNAL APPROVED FOR SIGNATURE")
+            print(f"✅ ENHANCED SIGNAL APPROVED")
             print(f"   Action: {signal_action}")
             print(f"   Strength: {signal_strength:.3f}")
+            print(f"   Reasons: {len(signal_reasons)} conditions met")
             
+            # สร้าง signal data
             signal_data = {
                 'action': signal_action,
                 'strength': signal_strength,
@@ -171,21 +230,37 @@ class SignalGenerator:
                 'candle_time': candle_time,
                 'candle_signature': candle_signature,
                 'reasons': signal_reasons,
-                'candle_color': candle_color,
-                'body_ratio': body_ratio,
+                
+                # ข้อมูลราคาและ body
+                'open': current_open,
+                'high': current_high,
+                'low': current_low,
                 'close': current_close,
                 'previous_close': previous_close,
                 'price_change': current_close - previous_close,
+                'body_ratio': current_body_ratio,
+                'body_size': current_body_size,
+                'previous_body_size': previous_body_size,
+                'body_growth_percent': ((current_body_size/max(previous_body_size,0.0001)-1)*100),
+                
+                # ข้อมูลเพิ่มเติม
                 'signal_id': f"{signal_action}_{datetime.now().strftime('%H%M%S')}",
-                'tracking_method': 'signature_based'
+                'tracking_method': 'enhanced_body_comparison',
+                'enhanced_conditions': True,
+                
+                # การวิเคราะห์เพิ่มเติม
+                'candle_color': candlestick_data.get('candle_color', 'unknown'),
+                'price_direction': 'higher_close' if is_higher_close else 'lower_close',
+                'pattern_name': candlestick_data.get('pattern_name', 'enhanced_body'),
+                'volume_factor': candlestick_data.get('volume_factor', 1.0)
             }
             
             return signal_data
             
         except Exception as e:
-            print(f"❌ Signature tracking signal error: {e}")
+            print(f"❌ Enhanced signal generation error: {e}")
             return self._create_wait_signal(f"Error: {str(e)}")
-
+        
     def _is_signal_sent_for_signature(self, signature: str) -> bool:
         """🔍 เช็คว่าลายเซ็นนี้ส่ง signal แล้วหรือยัง"""
         return signature in self.signal_signatures

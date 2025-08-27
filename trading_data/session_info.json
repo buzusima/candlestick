@@ -1,9 +1,9 @@
 {
-  "last_session_end": "2025-08-27T22:19:32.294893",
+  "last_session_end": "2025-08-27T22:37:53.761417",
   "session_data": {
-    "last_shutdown": "2025-08-27T22:19:32.294893",
+    "last_shutdown": "2025-08-27T22:37:53.761417",
     "trading_was_active": false,
-    "mt5_connected": true,
+    "mt5_connected": false,
     "total_runtime_minutes": 0
   },
   "clean_shutdown": true

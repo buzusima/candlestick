@@ -57,7 +57,9 @@ class OrderExecutor:
         self.retry_attempts = 3
         self.retry_delay = 0.5  # วินาที
         self.max_slippage = 10  # points
-        
+        self.executed_candle_timestamps = set()  
+        self.max_timestamp_history = 100 
+
         # Statistics tracking
         self.execution_stats = {
             'total_orders': 0,
@@ -82,7 +84,7 @@ class OrderExecutor:
     
     def execute_signal(self, signal_data: Dict) -> Optional[Dict]:
         """
-        ⚡ ส่งออเดอร์ตาม Signal ที่ได้รับ
+        ⚡ ส่งออเดอร์ตาม Signal พร้อม Candle Lock (UPDATED)
         
         Args:
             signal_data: ข้อมูล signal จาก SignalGenerator
@@ -91,7 +93,7 @@ class OrderExecutor:
             Dict: ผลการส่งออเดอร์ หรือ None ถ้าไม่ส่ง
         """
         try:
-            # ตรวจสอบ signal
+            # ตรวจสอบ signal (เดิม)
             if not self._validate_signal(signal_data):
                 return None
             
@@ -101,20 +103,38 @@ class OrderExecutor:
                 print(f"ℹ️ No execution needed for action: {action}")
                 return None
             
+            # 🔒 NEW: เช็ค Candle Lock ก่อนส่งออเดอร์
+            candle_timestamp = signal_data.get('candle_timestamp')
+            if candle_timestamp:
+                if self._is_order_sent_for_candle(candle_timestamp):
+                    print(f"🚫 ORDER BLOCKED: Already sent for this candle")
+                    return {
+                        'success': False,
+                        'blocked': True,
+                        'reason': 'Order already sent for this candle',
+                        'candle_timestamp': candle_timestamp
+                    }
+            
             print(f"⚡ Executing {action} signal...")
             print(f"   Signal strength: {signal_data.get('strength', 0):.2f}")
             print(f"   Signal ID: {signal_data.get('signal_id', 'unknown')}")
+            print(f"   Candle timestamp: {candle_timestamp}")
             
-            # คำนวณ lot size
+            # คำนวณ lot size (เดิม)
             lot_size = self._calculate_lot_size(signal_data)
             if lot_size <= 0:
                 print(f"❌ Invalid lot size calculated: {lot_size}")
                 return None
             
-            # ส่งออเดอร์ Market
+            # ส่งออเดอร์ Market (เดิม)
             execution_result = self._send_market_order(action, lot_size, signal_data)
             
-            # บันทึกสถิติ
+            # 🔒 NEW: ถ้าส่งสำเร็จ → ล็อกแท่งนี้
+            if execution_result and execution_result.get('success') and candle_timestamp:
+                self._lock_candle_for_order(candle_timestamp)
+                print(f"✅ Order sent and candle locked")
+            
+            # บันทึกสถิติ (เดิม)
             self._record_execution_stats(execution_result, signal_data)
             
             return execution_result
@@ -123,7 +143,7 @@ class OrderExecutor:
             print(f"❌ Signal execution error: {e}")
             self._record_failed_execution(signal_data, str(e))
             return None
-    
+        
     def _send_market_order(self, order_type: str, lot_size: float, signal_data: Dict) -> Optional[Dict]:
         """
         📤 ส่ง Market Order ผ่าน MT5 (COMPLETE FIXED)
@@ -605,3 +625,91 @@ class OrderExecutor:
             'retry_attempts': self.retry_attempts,
             'max_slippage': self.max_slippage
         }
+    
+    def _is_order_sent_for_candle(self, candle_timestamp: int) -> bool:
+        """
+        🔒 เช็คว่าส่งออเดอร์สำหรับแท่งนี้แล้วหรือยัง
+        
+        Args:
+            candle_timestamp: timestamp ของแท่งเทียน
+            
+        Returns:
+            bool: True = ส่งแล้ว (บล็อก), False = ยังไม่ส่ง (อนุญาต)
+        """
+        try:
+            if not hasattr(self, 'executed_candle_timestamps'):
+                self.executed_candle_timestamps = set()
+            
+            is_sent = candle_timestamp in self.executed_candle_timestamps
+            
+            print(f"🔒 ORDER LOCK CHECK:")
+            print(f"   Candle timestamp: {candle_timestamp}")
+            print(f"   Already executed: {'YES' if is_sent else 'NO'}")
+            
+            if is_sent:
+                candle_time = datetime.fromtimestamp(candle_timestamp)
+                print(f"   🚫 BLOCKED: Order already sent for {candle_time.strftime('%H:%M')} candle")
+                
+            return is_sent
+            
+        except Exception as e:
+            print(f"❌ Order lock check error: {e}")
+            return False
+
+    def _lock_candle_for_order(self, candle_timestamp: int):
+        """
+        🔒 ล็อกแท่งเทียนนี้ (ป้องกันส่งออเดอร์ซ้ำ)
+        
+        Args:
+            candle_timestamp: timestamp ของแท่งเทียน
+        """
+        try:
+            if not hasattr(self, 'executed_candle_timestamps'):
+                self.executed_candle_timestamps = set()
+            
+            # เพิ่ม timestamp เข้า lock set
+            self.executed_candle_timestamps.add(candle_timestamp)
+            
+            candle_time = datetime.fromtimestamp(candle_timestamp)
+            print(f"🔒 CANDLE LOCKED: {candle_time.strftime('%H:%M')} ({candle_timestamp})")
+            
+            # 🧹 ทำความสะอาด - เก็บแค่ 100 timestamps ล่าสุด
+            if len(self.executed_candle_timestamps) > self.max_timestamp_history:
+                timestamps_list = sorted(list(self.executed_candle_timestamps))
+                self.executed_candle_timestamps = set(timestamps_list[-50:])  # เก็บ 50 ตัวล่าสุด
+                print(f"🧹 Cleaned order locks: kept 50 most recent")
+            
+            print(f"📊 Total locked candles: {len(self.executed_candle_timestamps)}")
+            
+        except Exception as e:
+            print(f"❌ Lock candle error: {e}")
+
+    def get_order_lock_stats(self) -> Dict:
+        """📊 สถิติการล็อกออเดอร์"""
+        try:
+            if not hasattr(self, 'executed_candle_timestamps'):
+                return {'total_locks': 0, 'recent_locks': []}
+            
+            recent_timestamps = sorted(list(self.executed_candle_timestamps))[-5:]
+            recent_times = [datetime.fromtimestamp(ts).strftime('%H:%M') for ts in recent_timestamps]
+            
+            return {
+                'total_locks': len(self.executed_candle_timestamps),
+                'recent_locks': recent_times,
+                'max_history': self.max_timestamp_history
+            }
+            
+        except Exception as e:
+            return {'error': str(e)}
+
+    def clear_order_locks(self):
+        """🗑️ ล้างการล็อกออเดอร์ทั้งหมด (สำหรับ debug)"""
+        try:
+            if hasattr(self, 'executed_candle_timestamps'):
+                old_count = len(self.executed_candle_timestamps)
+                self.executed_candle_timestamps.clear()
+                print(f"🗑️ Cleared {old_count} order locks")
+            return True
+        except Exception as e:
+            print(f"❌ Clear order locks error: {e}")
+            return False

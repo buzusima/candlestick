@@ -8,7 +8,7 @@
   
   "trading": {
     "symbol": "XAUUSD.v",
-    "timeframe": "M5",
+    "timeframe": "M1",
     "market_orders_only": true,
     "signal_cooldown_seconds": 60,
     "max_signals_per_hour": 20,

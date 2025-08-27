@@ -72,48 +72,33 @@ class CandlestickAnalyzer:
     
     def _get_latest_closed_candle(self) -> Optional[Dict]:
         """
-        📊 Real Candle Comparison - ใช้แท่งจริงจาก MT5
+        📊 ดึงแท่งปัจจุบัน Real-Time - rates[0] vs rates[1]
         
-        🔧 BACK TO BASICS:
-        - ใช้แท่งจริงจาก Chart
-        - rates[0] = แท่งที่ปิดล่าสุด
-        - rates[1] = แท่งก่อนหน้า
-        - เปรียบเทียบ: rates[0].close vs rates[1].close
-        - ไม่สร้างแท่งปลอม ใช้ของจริงเท่านั้น
+        🔧 การแก้ไขครั้งสุดท้าย:
+        - rates[0] = แท่งปัจจุบัน (กำลังเกิดขึ้นตอนนี้)
+        - rates[1] = แท่งที่ปิดแล้ว
+        - ดูการเปลี่ยนแปลงแบบ Real-Time
         """
         try:
-            print(f"🔍 Getting REAL candles for symbol: {self.symbol}")
+            print(f"🔍 Getting REAL-TIME current candle vs previous")
             
-            # 1. ตรวจสอบการเชื่อมต่อ MT5
             if not self.mt5_connector or not self.mt5_connector.is_connected:
                 print("❌ MT5 not connected")
                 return None
             
-            # 2. ดึงแท่งเทียน 3 แท่งล่าสุดจาก MT5 (ต้องการ rates[1] และ rates[2])
-            rates = mt5.copy_rates_from_pos(self.symbol, self.timeframe, 0, 3)
-            if rates is None or len(rates) < 3:
-                print(f"❌ Cannot get 3 candles for symbol: {self.symbol}")
-                # ลอง symbol อื่น
-                alternative_symbols = ["XAUUSD", "GOLD", "XAUUSD.cmd"]
-                for alt_symbol in alternative_symbols:
-                    print(f"🔄 Trying alternative symbol: {alt_symbol}")
-                    rates = mt5.copy_rates_from_pos(alt_symbol, self.timeframe, 0, 3)
-                    if rates is not None and len(rates) >= 3:
-                        print(f"✅ Found candle data with symbol: {alt_symbol}")
-                        self.symbol = alt_symbol  # อัพเดท symbol
-                        break
-                
-                if rates is None or len(rates) < 3:
-                    print("❌ No real candle data available")
-                    return None
+            # ดึงแท่งเทียน 2 แท่งล่าสุด
+            rates = mt5.copy_rates_from_pos(self.symbol, self.timeframe, 0, 2)
+            if rates is None or len(rates) < 2:
+                print(f"❌ Cannot get 2 candles for {self.symbol}")
+                return None
             
-            print(f"✅ Got {len(rates)} real candles from MT5")
+            print(f"✅ Got {len(rates)} candles from MT5")
             
-            # 3. แท่งจริงจาก MT5 - ใช้ rates[1] vs rates[2]
-            current_raw = rates[1]    # แท่งที่เพิ่งปิด (เสถียรแล้ว)
-            previous_raw = rates[2]   # แท่งก่อนหน้า (ปิดแล้ว)
+            # 🔥 FINAL FIX: ใช้แท่งปัจจุบัน vs แท่งที่ปิดแล้ว
+            current_raw = rates[0]    # แท่งปัจจุบัน (กำลังเกิดขึ้น)
+            previous_raw = rates[1]   # แท่งที่ปิดแล้ว
             
-            # 4. แปลงข้อมูลแท่งปัจจุบัน
+            # แปลงข้อมูลแท่งปัจจุบัน (rates[0])
             current_candle = {
                 'time': datetime.fromtimestamp(int(current_raw['time'])),
                 'open': float(current_raw['open']),
@@ -123,7 +108,7 @@ class CandlestickAnalyzer:
                 'volume': int(current_raw['tick_volume']) if 'tick_volume' in current_raw.dtype.names else 0
             }
             
-            # 5. แปลงข้อมูลแท่งก่อนหน้า
+            # แปลงข้อมูลแท่งที่ปิดแล้ว (rates[1])
             previous_candle = {
                 'time': datetime.fromtimestamp(int(previous_raw['time'])),
                 'open': float(previous_raw['open']),
@@ -133,45 +118,43 @@ class CandlestickAnalyzer:
                 'volume': int(previous_raw['tick_volume']) if 'tick_volume' in previous_raw.dtype.names else 0
             }
             
-            # 6. Debug ข้อมูลแท่งจริง - rates[1] vs rates[2]
-            print(f"📊 REAL CANDLE COMPARISON (rates[1] vs rates[2]):")
-            print(f"   Current Candle [rates[1] - {current_candle['time'].strftime('%H:%M')}]:")
-            print(f"     OHLC: {current_candle['open']:.2f}/{current_candle['high']:.2f}/{current_candle['low']:.2f}/{current_candle['close']:.2f}")
-            print(f"   Previous Candle [rates[2] - {previous_candle['time'].strftime('%H:%M')}]:")
-            print(f"     OHLC: {previous_candle['open']:.2f}/{previous_candle['high']:.2f}/{previous_candle['low']:.2f}/{previous_candle['close']:.2f}")
+            # 🔥 Debug - แสดงข้อมูลจริง
+            print(f"🔥 REAL-TIME COMPARISON:")
+            print(f"   🟢 Current Candle [rates[0] - NOW]: {current_candle['time'].strftime('%H:%M')}")
+            print(f"      OHLC: O:{current_candle['open']:.2f} H:{current_candle['high']:.2f} L:{current_candle['low']:.2f} C:{current_candle['close']:.2f}")
+            print(f"   ⚪ Previous Candle [rates[1] - CLOSED]: {previous_candle['time'].strftime('%H:%M')}")
+            print(f"      OHLC: O:{previous_candle['open']:.2f} H:{previous_candle['high']:.2f} L:{previous_candle['low']:.2f} C:{previous_candle['close']:.2f}")
             
-            # 7. คำนวณการเปลี่ยนแปลงราคา
+            # 🔥 คำนวณการเปลี่ยนแปลง Real-Time
             price_diff = current_candle['close'] - previous_candle['close']
+            print(f"   🔥 Real-Time Price Change: {current_candle['close']:.2f} - {previous_candle['close']:.2f} = {price_diff:+.2f}")
             
-            print(f"   Price Difference: {price_diff:+.2f}")
-            
-            # 8. กำหนดทิศทางการเทรดจากแท่งจริง rates[1] vs rates[2]
-            min_price_change = 0.10  # ลดลงเป็น 10 cents สำหรับแท่งจริง
+            # 🔥 กำหนดทิศทาง Signal Real-Time
+            min_price_change = 0.10
             
             if price_diff > min_price_change:
                 signal_direction = 'BUY_SIGNAL'
-                print(f"   → 🟢 BUY Signal: rates[1] Close > rates[2] Close (+{price_diff:.2f})")
+                print(f"   → 🟢 BUY Signal: Current > Previous (+{price_diff:.2f})")
             elif price_diff < -min_price_change:
                 signal_direction = 'SELL_SIGNAL'
-                print(f"   → 🔴 SELL Signal: rates[1] Close < rates[2] Close ({price_diff:.2f})")
+                print(f"   → 🔴 SELL Signal: Current < Previous ({price_diff:.2f})")
             else:
                 signal_direction = 'NO_SIGNAL'
                 print(f"   → ⏳ No Signal: Change too small ({price_diff:+.2f})")
             
-            # 9. คำนวณความแข็งแกร่งจากแท่งจริง
+            # คำนวณความแข็งแกร่ง
             candle_range = current_candle['high'] - current_candle['low']
             body_size = abs(current_candle['close'] - current_candle['open'])
             body_ratio = body_size / candle_range if candle_range > 0 else 0
             
-            # รวม price strength และ candle strength
-            price_strength = min(abs(price_diff) / 5.0, 1.0)  # normalize by 5.0
+            price_strength = min(abs(price_diff) / 5.0, 1.0)
             candle_strength = min(body_ratio * 2, 1.0)
             overall_strength = (price_strength + candle_strength) / 2
             
-            print(f"   💪 Candle Analysis:")
-            print(f"     Body Ratio: {body_ratio:.3f}")
-            print(f"     Price Strength: {price_strength:.3f}")
-            print(f"     Overall Strength: {overall_strength:.3f}")
+            print(f"   💪 Strength Analysis:")
+            print(f"      Body Ratio: {body_ratio:.3f}")
+            print(f"      Price Strength: {price_strength:.3f}")
+            print(f"      Overall: {overall_strength:.3f}")
             
             return {
                 'current': current_candle,
@@ -182,156 +165,110 @@ class CandlestickAnalyzer:
                 'candle_strength': candle_strength,
                 'overall_strength': overall_strength,
                 'body_ratio': body_ratio,
-                'analysis_method': 'real_candle_rates_1_vs_2'
+                'analysis_method': 'real_time_current_vs_closed'
             }
             
         except Exception as e:
-            print(f"❌ Real candle comparison error: {e}")
+            print(f"❌ Real-time analysis error: {e}")
             return None
-            
+                
     def get_current_analysis(self) -> Optional[Dict]:
         """
-        📊 Real Candle Analysis - ใช้แท่งจริงจาก MT5
-        
-        🔧 BACK TO REAL CANDLES:
-        - BUY: Current Close > Previous Close
-        - SELL: Current Close < Previous Close
-        - ใช้แท่งจริงจาก Chart
-        - ไม่สร้างข้อมูลปลอม
+        📊 ดูแท่งปัจจุบันที่กำลังปิด - rates[0] vs rates[1]
         """
         try:
-            print("=== 📊 REAL CANDLE ANALYSIS ===")
+            print("=== 📊 ดูแท่งปัจจุบันที่กำลังปิด ===")
             
             if not self.mt5_connector.is_connected:
-                print("❌ MT5 not connected")
                 return None
             
-            # ดึงข้อมูลแท่งจริงจาก MT5
-            candle_data = self._get_latest_closed_candle()
-            if not candle_data:
-                print("❌ No real candle data available")
+            # ดึง 3 แท่งล่าสุด
+            rates = mt5.copy_rates_from_pos(self.symbol, self.timeframe, 0, 3)
+            if rates is None or len(rates) < 3:
                 return None
             
-            current_candle = candle_data['current']
-            previous_candle = candle_data['previous']
+            # 🔧 แก้ให้ดูแท่งปัจจุบัน
+            current_close = float(rates[0]['close'])   # แท่งปัจจุบัน (กำลังปิด/เพิ่งปิด)
+            previous_close = float(rates[1]['close'])  # แท่งก่อนหน้า
+            price_diff = current_close - previous_close
             
-            # สร้าง OHLC signature จากแท่งจริง
-            candle_signature = self._create_candle_signature(current_candle)
+            print(f"📊 แท่งปัจจุบัน vs แท่งก่อน:")
+            print(f"   แท่งปัจจุบัน [rates[0]] ปิด: ${current_close:.2f}")
+            print(f"   แท่งก่อน [rates[1]] ปิด: ${previous_close:.2f}")
+            print(f"   ต่างกัน: {price_diff:+.2f}")
             
-            # เช็คว่าวิเคราะห์แท่งนี้แล้วหรือยัง
+            # ตัดสินใจจากแท่งปัจจุบัน
+            if price_diff > 0.10:
+                signal_type = "BUY"
+                print(f"   → 🟢 BUY: แท่งปัจจุบันปิดสูงกว่า")
+            elif price_diff < -0.10:
+                signal_type = "SELL"
+                print(f"   → 🔴 SELL: แท่งปัจจุบันปิดต่ำกว่า")
+            else:
+                print(f"   → ⏳ WAIT: เปลี่ยนแปลงน้อย")
+                return None
+            
+            # สร้าง signature จากแท่งปัจจุบัน
+            current_time = datetime.fromtimestamp(int(rates[0]['time']))
+            candle_signature = f"{current_time.strftime('%H%M')}_{current_close:.2f}"
+            
+            # เช็ค 1 แท่ง = 1 ออเดอร์
             if self._is_signature_processed(candle_signature):
-                print("🔄 Real candle already analyzed - skipping")
+                print("🔄 แท่งนี้ส่งออเดอร์แล้ว - ข้าม")
                 return None
             
-            print(f"🆕 NEW REAL CANDLE ANALYSIS (rates[1] vs rates[2]):")
-            print(f"   OHLC Signature: {candle_signature}")
-            print(f"   Method: Real Candle rates[1] vs rates[2] Comparison")
+            # คำนวณเนื้อเทียน (จากแท่งปัจจุบัน)
+            current_open = float(rates[0]['open'])
+            body_size = abs(current_close - current_open)
+            body_ratio = 1.0 if body_size > 0 else 0.0
             
-            # ดึงข้อมูลจากแท่งจริง
-            current_close = current_candle['close']
-            previous_close = previous_candle['close']
-            price_diff = candle_data['price_difference']
-            overall_strength = candle_data['overall_strength']
-            body_ratio = candle_data['body_ratio']
+            print(f"📊 เนื้อเทียนแท่งปัจจุบัน:")
+            print(f"   Open: ${current_open:.2f}")
+            print(f"   Close: ${current_close:.2f}")
+            print(f"   เนื้อเทียน: {body_size:.2f}")
             
-            # กำหนดสีแท่งเทียนจากข้อมูลจริง
-            if current_candle['close'] > current_candle['open']:
-                candle_color = 'green'
-                candle_type = 'bullish'
-            elif current_candle['close'] < current_candle['open']:
-                candle_color = 'red'
-                candle_type = 'bearish'
-            else:
-                candle_color = 'doji'
-                candle_type = 'neutral'
-            
-            # กำหนดทิศทางราคา
-            if current_close > previous_close:
-                price_direction = 'higher_close'
-                signal_type = 'bullish'
-            elif current_close < previous_close:
-                price_direction = 'lower_close'
-                signal_type = 'bearish'
-            else:
-                price_direction = 'same_close'
-                signal_type = 'neutral'
-            
-            print(f"📊 REAL CANDLE RESULTS:")
-            print(f"   Current Close: ${current_close:.2f}")
-            print(f"   Previous Close: ${previous_close:.2f}")
-            print(f"   Price Change: {price_diff:+.2f}")
-            print(f"   Candle Color: {candle_color}")
-            print(f"   Signal Type: {signal_type}")
-            print(f"   Body Ratio: {body_ratio:.3f}")
-            print(f"   Overall Strength: {overall_strength:.3f}")
-            
-            # รวมข้อมูลทั้งหมดจากแท่งจริง
-            complete_analysis = {
-                'symbol': self.symbol,
-                'timestamp': datetime.now(),
-                'candle_time': current_candle['time'],
-                'candle_signature': candle_signature,
-                
-                # Current candle data (จริง)
-                'open': current_candle['open'],
-                'high': current_candle['high'],
-                'low': current_candle['low'],
-                'close': current_candle['close'],
-                
-                # Previous candle data (จริง)
-                'previous_open': previous_candle['open'],
-                'previous_high': previous_candle['high'],
-                'previous_low': previous_candle['low'],
-                'previous_close': previous_candle['close'],
-                
-                # Analysis results จากแท่งจริง
-                'price_difference': price_diff,
-                'body_ratio': body_ratio,
-                'candle_color': candle_color,
-                'candle_type': candle_type,
-                'price_direction': price_direction,
-                'signal_type': signal_type,
-                'analysis_strength': overall_strength,
-                
-                # Pattern info
-                'pattern_name': f'real_{signal_type}',
-                'pattern_strength': overall_strength,
-                
-                # Technical indicators
-                'is_bullish': signal_type == 'bullish',
-                'is_bearish': signal_type == 'bearish',
-                'is_strong_signal': overall_strength >= 0.3,
-                
-                # Volume จากแท่งจริง
-                'volume_available': True,
-                'current_volume': current_candle['volume'],
-                'previous_volume': previous_candle['volume'],
-                'volume_factor': current_candle['volume'] / max(previous_candle['volume'], 1),
-                
-                # Metadata
-                'tracking_method': 'real_candle_rates_1_vs_2',
-                'market_context': f"real_session_{datetime.now().hour}",
-                'analysis_method': 'mt5_rates_1_vs_2',
-                'candle_range': current_candle['high'] - current_candle['low'],
-                'body_size': abs(current_candle['close'] - current_candle['open']),
-                'price_strength': candle_data['price_strength'],
-                'candle_strength': candle_data['candle_strength']
-            }
-            
-            # บันทึกว่าวิเคราะห์แท่งจริงนี้แล้ว
+            # บันทึก signature
             self._mark_signature_processed(candle_signature)
             
-            print(f"✅ REAL CANDLE ANALYSIS COMPLETED")
-            print(f"   Signal: {signal_type.upper()}")
-            print(f"   Strength: {overall_strength:.3f}")
-            print(f"   Real OHLC: {candle_signature}")
-            
-            return complete_analysis
+            return {
+                'symbol': self.symbol,
+                'timestamp': datetime.now(),
+                'candle_time': current_time,
+                'candle_signature': candle_signature,
+                
+                # ข้อมูลหลัก (จากแท่งปัจจุบัน)
+                'close': current_close,
+                'previous_close': previous_close,
+                'price_change': price_diff,
+                'signal_direction': signal_type.lower(),
+                
+                # ข้อมูลแท่งปัจจุบัน
+                'open': current_open,
+                'high': float(rates[0]['high']),
+                'low': float(rates[0]['low']),
+                
+                # เนื้อเทียน
+                'body_ratio': body_ratio,
+                'body_size': body_size,
+                'candle_range': body_size,
+                
+                'pattern_name': f'current_{signal_type.lower()}',
+                'one_candle_one_order': True,
+                'is_current_candle': True,
+                
+                'volume_available': True,
+                'current_volume': int(rates[0]['tick_volume']) if 'tick_volume' in rates[0].dtype.names else 0,
+                'volume_factor': 1.0,
+                
+                'tracking_method': 'current_candle_rates_0_vs_1',
+                'analysis_method': 'current_candle_only',
+                'analysis_strength': min(abs(price_diff) / 5.0, 1.0)
+            }
             
         except Exception as e:
-            print(f"❌ Real candle analysis error: {e}")
+            print(f"❌ Current candle error: {e}")
             return None
-                        
+                                        
     def _create_candle_signature(self, candle: Dict) -> str:
         """
         🔑 สร้างลายเซ็น OHLC - PURE OHLC NO TIME VERSION

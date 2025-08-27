@@ -80,156 +80,73 @@ class SignalGenerator:
     
     def generate_signal(self, candlestick_data: Dict) -> Optional[Dict]:
         """
-        🎯 สร้าง Signal - REAL CANDLE VERSION
-        
-        🔧 BACK TO REAL CANDLES:
-        - ใช้แท่งจริงจาก MT5
-        - BUY: Current Close > Previous Close  
-        - SELL: Current Close < Previous Close
-        - ไม่ซับซ้อน ไม่สร้างข้อมูลปลอม
+        🎯 1 แท่ง = 1 ออเดอร์ Signal Generator
         """
         try:
-            print(f"\n=== 🎯 REAL CANDLE SIGNAL GENERATION ===")
+            print(f"\n=== 🎯 1 CANDLE = 1 ORDER SIGNAL ===")
             
-            # ดึงลายเซ็น OHLC จากแท่งจริง
-            candle_signature = candlestick_data.get('candle_signature')
-            if not candle_signature:
-                return self._create_wait_signal("No real OHLC signature")
+            # ตรวจสอบว่าเป็น 1 แท่ง = 1 ออเดอร์
+            if not candlestick_data.get('one_candle_one_order', False):
+                return self._create_wait_signal("Not one-candle-one-order signal")
             
-            # เช็คว่าส่ง signal สำหรับแท่งจริงนี้แล้วหรือยัง
-            if self._is_signal_sent_for_signature(candle_signature):
-                return self._create_wait_signal("Signal already sent for this real candle")
-            
+            signal_direction = candlestick_data.get('signal_direction', '')
+            price_change = candlestick_data.get('price_change', 0)
+            body_ratio = candlestick_data.get('body_ratio', 0)
             candle_time = candlestick_data.get('candle_time')
-            print(f"🆕 Processing real candle (rates[1]): {candle_time.strftime('%H:%M') if candle_time else 'Unknown'}")
-            print(f"   Real OHLC: {candle_signature}")
             
-            # ดึงข้อมูลจากแท่งจริง
-            current_close = float(candlestick_data.get('close', 0))
-            previous_close = float(candlestick_data.get('previous_close', 0))
-            price_diff = float(candlestick_data.get('price_difference', 0))
-            overall_strength = float(candlestick_data.get('analysis_strength', 0))
-            body_ratio = float(candlestick_data.get('body_ratio', 0))
-            candle_color = candlestick_data.get('candle_color', 'unknown')
-            signal_type = candlestick_data.get('signal_type', 'neutral')
-            
-            print(f"📊 REAL CANDLE DATA (rates[1] vs rates[2]):")
-            print(f"   Current Close [rates[1]]: ${current_close:.2f}")
-            print(f"   Previous Close [rates[2]]: ${previous_close:.2f}")
-            print(f"   Price Change: {price_diff:+.2f}")
-            print(f"   Candle Color: {candle_color}")
+            print(f"📊 1 แท่ง = 1 ออเดอร์:")
+            print(f"   เวลาแท่ง: {candle_time.strftime('%H:%M') if candle_time else 'Unknown'}")
+            print(f"   ทิศทาง: {signal_direction}")
+            print(f"   เนื้อเทียนเปลี่ยน: {price_change:+.2f}")
             print(f"   Body Ratio: {body_ratio:.3f}")
-            print(f"   Overall Strength: {overall_strength:.3f}")
             
-            # เงื่อนไขพื้นฐานจากแท่งจริง
-            min_price_change = 0.10      # 10 cents สำหรับแท่งจริง
-            min_strength = 0.20          # 20% strength
-            min_body_ratio = 0.05        # 5% body ratio
+            # เงื่อนไข 1 แท่ง = 1 ออเดอร์
+            min_body_ratio = 0.05  # 5% ขั้นต่ำ
             
-            # ตรวจสอบเงื่อนไข
-            price_change_ok = abs(price_diff) >= min_price_change
-            strength_ok = overall_strength >= min_strength
-            body_ok = body_ratio >= min_body_ratio
-            
-            print(f"🔍 REAL CANDLE SIGNAL CONDITIONS (rates[1] vs rates[2]):")
-            print(f"   Price Change OK: {price_change_ok} (|{price_diff:.2f}| >= {min_price_change})")
-            print(f"   Strength OK: {strength_ok} ({overall_strength:.3f} >= {min_strength})")
-            print(f"   Body OK: {body_ok} ({body_ratio:.3f} >= {min_body_ratio})")
-            
-            # ตัดสินใจ signal จากแท่งจริง
-            signal_action = 'WAIT'
-            signal_strength = 0.0
-            signal_reasons = []
-            
-            if price_change_ok and strength_ok and body_ok:
-                if signal_type == 'bullish' and price_diff > 0:
-                    signal_action = 'BUY'
-                    signal_reasons.append(f"📈 Real candle: rates[1] close (${current_close:.2f}) > rates[2] close (${previous_close:.2f})")
-                    signal_reasons.append(f"🟢 Bullish {candle_color} candle with body ratio {body_ratio:.1%}")
-                    
-                elif signal_type == 'bearish' and price_diff < 0:
-                    signal_action = 'SELL'
-                    signal_reasons.append(f"📉 Real candle: rates[1] close (${current_close:.2f}) < rates[2] close (${previous_close:.2f})")
-                    signal_reasons.append(f"🔴 Bearish {candle_color} candle with body ratio {body_ratio:.1%}")
+            if signal_direction == 'buy' and body_ratio >= min_body_ratio:
+                signal_action = 'BUY'
+                signal_strength = min(abs(price_change) / 3.0, 1.0)  # ปรับเป็น /3.0
+                reasons = [f"1 แท่ง = 1 BUY: เนื้อเทียนปิดสูงกว่า +{price_change:.2f}"]
                 
-                else:
-                    return self._create_wait_signal(f"Signal type mismatch: {signal_type} but price_diff = {price_diff:+.2f}")
-                
-                # คำนวณ signal strength จากแท่งจริง
-                signal_strength = min(overall_strength, 1.0)
-                signal_reasons.append(f"💪 Real candle strength: {signal_strength:.3f}")
+            elif signal_direction == 'sell' and body_ratio >= min_body_ratio:
+                signal_action = 'SELL'
+                signal_strength = min(abs(price_change) / 3.0, 1.0)  # ปรับเป็น /3.0
+                reasons = [f"1 แท่ง = 1 SELL: เนื้อเทียนปิดต่ำกว่า {price_change:.2f}"]
                 
             else:
-                reasons = []
-                if not price_change_ok:
-                    reasons.append(f"Price change too small ({abs(price_diff):.2f} < {min_price_change})")
-                if not strength_ok:
-                    reasons.append(f"Candle too weak ({overall_strength:.3f} < {min_strength})")
-                if not body_ok:
-                    reasons.append(f"Body too small ({body_ratio:.3f} < {min_body_ratio})")
-                return self._create_wait_signal("; ".join(reasons))
+                return self._create_wait_signal("เนื้อเทียนไม่เพียงพอสำหรับ 1 แท่ง = 1 ออเดอร์")
             
-            # เช็ค minimum signal strength สุดท้าย
-            min_signal_strength = 0.25  # 25% สำหรับแท่งจริง
-            if signal_strength < min_signal_strength:
-                return self._create_wait_signal(f"Signal too weak ({signal_strength:.2f} < {min_signal_strength})")
+            print(f"✅ 1 แท่ง = 1 ออเดอร์ SIGNAL: {signal_action}")
+            print(f"   ความแรง: {signal_strength:.3f}")
+            print(f"   เนื้อเทียนเท่านั้น: ใช่")
             
-            # บันทึกว่าส่ง signal สำหรับแท่งจริงนี้แล้ว
-            self._mark_signal_sent_for_signature(candle_signature)
-            
-            print(f"✅ REAL CANDLE SIGNAL APPROVED")
-            print(f"   Action: {signal_action}")
-            print(f"   Strength: {signal_strength:.3f}")
-            print(f"   Real Candle: {candle_color} {signal_type}")
-            print(f"   OHLC: {candle_signature}")
-            
-            # สร้าง signal data จากแท่งจริง
-            signal_data = {
+            return {
                 'action': signal_action,
                 'strength': signal_strength,
                 'confidence': signal_strength,
                 'timestamp': datetime.now(),
                 'candle_time': candle_time,
-                'candle_signature': candle_signature,
-                'reasons': signal_reasons,
-                
-                # ข้อมูลแท่งจริง
-                'open': candlestick_data.get('open'),
-                'high': candlestick_data.get('high'),
-                'low': candlestick_data.get('low'),
-                'close': current_close,
-                'previous_close': previous_close,
-                'price_change': price_diff,
-                
-                # การวิเคราะห์จากแท่งจริง
-                'body_ratio': body_ratio,
-                'candle_color': candle_color,
-                'signal_type': signal_type,  # ใช้ signal_type แทน candle_type
-                'analysis_strength': overall_strength,
-                
-                # ข้อมูลเพิ่มเติม
+                'reasons': reasons,
                 'signal_id': f"{signal_action}_{datetime.now().strftime('%H%M%S')}",
-                'tracking_method': 'real_candle_rates_1_vs_2_signal',
-                'is_real_candle': True,
                 
-                # Volume จากแท่งจริง
-                'volume_factor': candlestick_data.get('volume_factor', 1.0),
-                'current_volume': candlestick_data.get('current_volume', 0),
-                'previous_volume': candlestick_data.get('previous_volume', 0),
+                # ข้อมูลเนื้อเทียน
+                'close': candlestick_data.get('close'),
+                'previous_close': candlestick_data.get('previous_close'),
+                'price_change': price_change,
+                'body_ratio': body_ratio,
+                'body_size': candlestick_data.get('body_size'),
                 
-                # Pattern จากแท่งจริง
-                'pattern_name': candlestick_data.get('pattern_name', f'real_{signal_action.lower()}'),
-                'price_direction': candlestick_data.get('price_direction'),
-                'candle_range': candlestick_data.get('candle_range', 0),
-                'body_size': candlestick_data.get('body_size', 0)
+                # การทำงาน
+                'one_candle_one_order': True,
+                'body_only_signal': True,
+                'pattern_name': f'one_candle_{signal_action.lower()}',
+                'tracking_method': 'one_candle_one_order_body_only'
             }
             
-            return signal_data
-            
         except Exception as e:
-            print(f"❌ Real candle signal generation error: {e}")
+            print(f"❌ 1 candle 1 order signal error: {e}")
             return self._create_wait_signal(f"Error: {str(e)}")
-                    
+                                
     def _is_signal_sent_for_signature(self, signature: str) -> bool:
         """
         🔍 เช็คว่าลายเซ็น OHLC นี้ส่ง signal แล้วหรือยัง

@@ -239,7 +239,7 @@ class PositionMonitor:
     
     def check_smart_close_opportunities(self) -> List[Dict]:
         """
-        🧠 หาโอกาสปิดออเดอร์อัจฉริยะ
+        🧠 หาโอกาสปิดออเดอร์อัจฉริยะ (ไม่มี Emergency/Aging)
         
         Returns:
             List[Dict]: รายการ close actions ที่แนะนำ
@@ -264,13 +264,6 @@ class PositionMonitor:
             profit_actions = self._find_profit_opportunities(positions)
             close_opportunities.extend(profit_actions)
             
-            # 4. Emergency Analysis
-            emergency_actions = self._find_emergency_opportunities(positions)
-            close_opportunities.extend(emergency_actions)
-            
-            # 5. Old Losing Positions
-            aging_actions = self._find_aging_opportunities(positions)
-            close_opportunities.extend(aging_actions)
             
             # เรียงตาม priority
             close_opportunities.sort(key=lambda x: x.get('priority', 5))
@@ -282,8 +275,8 @@ class PositionMonitor:
             
         except Exception as e:
             print(f"❌ Smart close analysis error: {e}")
-            return []
-    
+        return []
+        
     def _find_recovery_opportunities(self, positions: List[Dict]) -> List[Dict]:
         """🎯 หาโอกาส Smart Recovery"""
         try:
@@ -411,7 +404,7 @@ class PositionMonitor:
             return []
     
     def _find_profit_opportunities(self, positions: List[Dict]) -> List[Dict]:
-        """💰 หาโอกาสปิดเพื่อกำไร"""
+        """💰 หาโอกาสปิดเพื่อกำไร (ปรับเงื่อนไข)"""
         try:
             profit_actions = []
             
@@ -427,30 +420,32 @@ class PositionMonitor:
             # เรียงตามกำไรจากมากไปน้อย
             profitable_positions.sort(key=lambda x: x.get('total_pnl', 0), reverse=True)
             
-            # วิเคราะห์แต่ละ position
+            # วิเคราะห์แต่ละ position - ปรับเงื่อนไขให้เข้มงวดขึ้น
             for pos in profitable_positions:
                 profit = pos.get('total_pnl', 0)
                 age_hours = pos.get('age_hours', 0)
                 
-                # เกณฑ์การปิดเพื่อกำไร
+                # เกณฑ์การปิดเพื่อกำไร - เข้มงวดขึ้น
                 close_profit = False
                 priority = 4  # ปกติ
                 reason = ""
                 
-                if profit >= 50.0:  # กำไรมาก
+                if profit >= 100.0:  # กำไรมากมาก (เพิ่มจาก 50)
                     close_profit = True
                     priority = 1  # สำคัญมาก
-                    reason = f"High profit: ${profit:.2f}"
+                    reason = f"Very high profit: ${profit:.2f}"
                     
-                elif profit >= 20.0 and age_hours >= 2:  # กำไรปานกลาง + อายุพอสมควร
+                elif profit >= 50.0 and age_hours >= 4:  # กำไรมาก + อายุพอสมควร (เพิ่มจาก 2h)
                     close_profit = True
                     priority = 2
-                    reason = f"Moderate profit with age: ${profit:.2f} ({age_hours:.1f}h)"
+                    reason = f"High profit with age: ${profit:.2f} ({age_hours:.1f}h)"
                     
-                elif profit >= self.min_profit_to_close and age_hours >= 12:  # กำไรน้อย + อายุมาก
+                elif profit >= 20.0 and age_hours >= 24:  # กำไรปานกลาง + อายุมาก (เพิ่มจาก 12h)
                     close_profit = True
                     priority = 3
-                    reason = f"Small profit but old: ${profit:.2f} ({age_hours:.1f}h)"
+                    reason = f"Medium profit but very old: ${profit:.2f} ({age_hours:.1f}h)"
+                
+                # 🔧 เข้มงวดขึ้น - ไม่ปิดกำไรเล็กๆ แม้จะเก่า
                 
                 if close_profit:
                     profit_action = {
@@ -467,96 +462,7 @@ class PositionMonitor:
             
         except Exception as e:
             print(f"❌ Profit opportunities error: {e}")
-            return []
-    
-    def _find_emergency_opportunities(self, positions: List[Dict]) -> List[Dict]:
-        """🚨 หาสถานการณ์ฉุกเฉิน"""
-        try:
-            emergency_actions = []
-            
-            # คำนวณ total P&L
-            total_pnl = sum(p.get('total_pnl', 0) for p in positions)
-            
-            # ตรวจสอบ total loss มากเกินไป
-            if total_pnl <= self.max_total_loss:
-                emergency_action = {
-                    'action_type': 'emergency_total_loss',
-                    'positions_to_close': [p['id'] for p in positions],
-                    'total_loss': total_pnl,
-                    'max_allowed': self.max_total_loss,
-                    'priority': 0,  # สำคัญที่สุด
-                    'reason': f"EMERGENCY: Total loss ${total_pnl:.2f} exceeds limit ${self.max_total_loss:.2f}"
-                }
-                emergency_actions.append(emergency_action)
-                print(f"🚨 EMERGENCY: Total loss exceeds limit!")
-            
-            # ตรวจสอบ single position loss มากเกินไป
-            for pos in positions:
-                loss = pos.get('total_pnl', 0)
-                if loss <= self.max_single_loss:
-                    emergency_action = {
-                        'action_type': 'emergency_single_loss',
-                        'position_id': pos['id'],
-                        'loss_amount': loss,
-                        'max_allowed': self.max_single_loss,
-                        'priority': 1,
-                        'reason': f"EMERGENCY: Single loss ${loss:.2f} exceeds limit ${self.max_single_loss:.2f}"
-                    }
-                    emergency_actions.append(emergency_action)
-            
-            # ตรวจสอบ margin level
-            account_info = self.mt5_connector.get_account_info()
-            if account_info:
-                margin = account_info.get('margin', 0)
-                equity = account_info.get('equity', 0)
-                
-                if margin > 0:
-                    margin_level = (equity / margin) * 100
-                    
-                    if margin_level <= self.margin_level_warning:
-                        emergency_action = {
-                            'action_type': 'emergency_margin',
-                            'positions_to_close': [p['id'] for p in positions if p.get('total_pnl', 0) < 0],
-                            'margin_level': margin_level,
-                            'warning_level': self.margin_level_warning,
-                            'priority': 1,
-                            'reason': f"EMERGENCY: Low margin level {margin_level:.1f}%"
-                        }
-                        emergency_actions.append(emergency_action)
-            
-            return emergency_actions
-            
-        except Exception as e:
-            print(f"❌ Emergency opportunities error: {e}")
-            return []
-    
-    def _find_aging_opportunities(self, positions: List[Dict]) -> List[Dict]:
-        """⏰ หา Positions ที่เก่าและติดลบ"""
-        try:
-            aging_actions = []
-            
-            for pos in positions:
-                age_hours = pos.get('age_hours', 0)
-                profit = pos.get('total_pnl', 0)
-                
-                # Position เก่าและติดลบ
-                if age_hours >= self.max_losing_age_hours and profit < 0:
-                    aging_action = {
-                        'action_type': 'aging_position',
-                        'position_id': pos['id'],
-                        'age_hours': age_hours,
-                        'loss_amount': profit,
-                        'max_age': self.max_losing_age_hours,
-                        'priority': 4,
-                        'reason': f"Old losing position: {age_hours:.1f}h old, ${profit:.2f}"
-                    }
-                    aging_actions.append(aging_action)
-            
-            return aging_actions
-            
-        except Exception as e:
-            print(f"❌ Aging opportunities error: {e}")
-            return []
+            return []        
     
     # ==========================================
     # ⚡ CLOSE EXECUTION METHODS
@@ -564,7 +470,7 @@ class PositionMonitor:
     
     def execute_close_action(self, close_action: Dict) -> bool:
         """
-        ⚡ ดำเนินการปิดออเดอร์ตาม Action
+        ⚡ ดำเนินการปิดออเดอร์ตาม Action (ไม่มี Emergency/Aging)
         
         Args:
             close_action: ข้อมูล close action
@@ -591,13 +497,7 @@ class PositionMonitor:
                 
             elif action_type == 'profit_target':
                 success = self._execute_profit_close(close_action)
-                
-            elif action_type in ['emergency_total_loss', 'emergency_single_loss', 'emergency_margin']:
-                success = self._execute_emergency_close(close_action)
-                
-            elif action_type == 'aging_position':
-                success = self._execute_aging_close(close_action)
-                
+                            
             else:
                 print(f"❌ Unknown action type: {action_type}")
                 return False
@@ -659,50 +559,7 @@ class PositionMonitor:
         except Exception as e:
             print(f"❌ Profit close error: {e}")
             return False
-    
-    def _execute_emergency_close(self, action: Dict) -> bool:
-        """🚨 ดำเนินการปิดฉุกเฉิน"""
-        try:
-            action_type = action.get('action_type')
             
-            if action_type == 'emergency_total_loss':
-                positions_to_close = action.get('positions_to_close', [])
-                print(f"🚨 EMERGENCY: Closing ALL {len(positions_to_close)} positions")
-                return self._close_multiple_positions(positions_to_close, "EMERGENCY - Total Loss")
-                
-            elif action_type == 'emergency_single_loss':
-                position_id = action.get('position_id')
-                loss_amount = action.get('loss_amount', 0)
-                print(f"🚨 EMERGENCY: Closing position {position_id} (${loss_amount:.2f})")
-                return self.close_position_by_id(position_id, "EMERGENCY - Single Loss")
-                
-            elif action_type == 'emergency_margin':
-                positions_to_close = action.get('positions_to_close', [])
-                margin_level = action.get('margin_level', 0)
-                print(f"🚨 EMERGENCY: Low margin {margin_level:.1f}% - Closing {len(positions_to_close)} losing positions")
-                return self._close_multiple_positions(positions_to_close, "EMERGENCY - Low Margin")
-            
-            return False
-            
-        except Exception as e:
-            print(f"❌ Emergency close error: {e}")
-            return False
-    
-    def _execute_aging_close(self, action: Dict) -> bool:
-        """⏰ ดำเนินการปิด Position เก่า"""
-        try:
-            position_id = action.get('position_id')
-            age_hours = action.get('age_hours', 0)
-            loss_amount = action.get('loss_amount', 0)
-            
-            print(f"⏰ Aging Close: Position {position_id} ({age_hours:.1f}h old, ${loss_amount:.2f})")
-            
-            return self.close_position_by_id(position_id, "Aging Position")
-            
-        except Exception as e:
-            print(f"❌ Aging close error: {e}")
-            return False
-    
     # ==========================================
     # 🔧 CORE CLOSE METHODS
     # ==========================================
@@ -857,15 +714,12 @@ class PositionMonitor:
     # ==========================================
     
     def _record_close_stats(self, action_type: str):
-        """📝 บันทึกสถิติการปิดออเดอร์"""
+        """📝 บันทึกสถิติการปิดออเดอร์ (ไม่นับ Emergency)"""
         try:
             if action_type == 'smart_recovery':
                 self.close_stats['recovery_closes'] += 1
             elif action_type == 'profit_target':
                 self.close_stats['profit_closes'] += 1
-            elif 'emergency' in action_type:
-                self.close_stats['emergency_closes'] += 1
-            
             self.close_stats['smart_closes'] += 1
             
         except Exception as e:

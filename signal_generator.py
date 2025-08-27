@@ -65,6 +65,10 @@ class SignalGenerator:
         self.signals_generated = {'BUY': 0, 'SELL': 0, 'WAIT': 0}
         self.signal_quality_scores = []
         
+        self.last_signal_signature = None     # ลายเซ็นของแท่งที่ส่ง signal ล่าสุด
+        self.signal_signatures = set()        # เก็บลายเซ็นที่ส่ง signal แล้ว
+        self.max_signal_history = 30 
+
         print(f"🎯 Signal Generator initialized")
         print(f"   Cooldown: {self.cooldown_seconds}s between signals")
         print(f"   Max signals/hour: {self.max_signals_per_hour}")
@@ -76,279 +80,274 @@ class SignalGenerator:
     
     def generate_signal(self, candlestick_data: Dict) -> Optional[Dict]:
         """
-        DEBUG VERSION: ดู logic ทุกขั้นตอน
+        🎯 สร้าง Signal - SIGNATURE TRACKING VERSION
         """
         try:
-            print(f"\n=== SIGNAL GENERATION DEBUG ===")
-            print(f"Input data:")
-            print(f"   Candle color: {candlestick_data.get('candle_color')}")
-            print(f"   Price direction: {candlestick_data.get('price_direction')}")
-            print(f"   Body ratio: {candlestick_data.get('body_ratio', 0):.3f}")
-            print(f"   Close: {candlestick_data.get('close', 0):.2f}")
-            print(f"   Previous close: {candlestick_data.get('previous_close', 0):.2f}")
+            print(f"\n=== 🎯 SIGNAL GENERATION (SIGNATURE TRACKING) ===")
             
-            # ตรวจสอบ rate limiting
-            if not self._can_generate_signal():
-                return self._create_wait_signal("Rate limited or in cooldown")
+            # ดึงลายเซ็นแท่งปัจจุบัน
+            candle_signature = candlestick_data.get('candle_signature')
+            if not candle_signature:
+                return self._create_wait_signal("No candle signature provided")
             
-            # ตรวจสอบคุณภาพข้อมูล
-            if not self._validate_candlestick_data(candlestick_data):
-                return self._create_wait_signal("Invalid candlestick data")
+            # เช็คว่าแท่งนี้ส่ง signal แล้วหรือยัง
+            if self._is_signal_sent_for_signature(candle_signature):
+                print(f"🚫 Signal already sent for this candle signature")
+                return self._create_wait_signal("Signal already sent for this candle")
             
-            # วิเคราะห์เงื่อนไข BUY
-            print(f"\n--- BUY CONDITIONS CHECK ---")
-            buy_signal_data = self._evaluate_buy_conditions(candlestick_data)
+            candle_time = candlestick_data.get('candle_time')
+            print(f"🆕 New signature for signal: {candle_time.strftime('%H:%M:%S') if candle_time else 'Unknown'}")
+            print(f"   Signature: {candle_signature}")
             
-            # วิเคราะห์เงื่อนไข SELL
-            print(f"\n--- SELL CONDITIONS CHECK ---")
-            sell_signal_data = self._evaluate_sell_conditions(candlestick_data)
+            # ประมวลผล signal ตามปกติ
+            candle_color = candlestick_data.get('candle_color')
+            current_close = float(candlestick_data.get('close', 0))
+            previous_close = float(candlestick_data.get('previous_close', 0))
+            body_ratio = float(candlestick_data.get('body_ratio', 0))
             
-            # แสดงผลลัพธ์
-            print(f"\n--- RESULTS ---")
-            print(f"BUY: passed={buy_signal_data.get('core_conditions_passed')}, strength={buy_signal_data.get('signal_strength', 0):.3f}")
-            print(f"SELL: passed={sell_signal_data.get('core_conditions_passed')}, strength={sell_signal_data.get('signal_strength', 0):.3f}")
+            # เช็คเงื่อนไข
+            is_green_candle = (candle_color == 'green')
+            is_red_candle = (candle_color == 'red')
+            is_higher_close = (current_close > previous_close)
+            is_lower_close = (current_close < previous_close)
             
-            # ตัดสินใจ signal สุดท้าย
-            final_signal = self._decide_final_signal(buy_signal_data, sell_signal_data, candlestick_data)
+            min_body_ratio = self.buy_conditions.get('min_body_ratio', 0.1)
+            body_sufficient = body_ratio >= min_body_ratio
             
-            # บันทึก signal history
-            self._record_signal(final_signal)
+            min_price_change = 0.01
+            price_change_sufficient = abs(current_close - previous_close) >= min_price_change
             
-            return final_signal
+            # ตัดสินใจ signal
+            buy_valid = is_green_candle and is_higher_close
+            sell_valid = is_red_candle and is_lower_close
+            
+            print(f"🔍 Signal Conditions:")
+            print(f"   BUY Valid: {buy_valid} (green: {is_green_candle}, higher: {is_higher_close})")
+            print(f"   SELL Valid: {sell_valid} (red: {is_red_candle}, lower: {is_lower_close})")
+            print(f"   Body Sufficient: {body_sufficient} ({body_ratio:.3f} >= {min_body_ratio})")
+            print(f"   Price Change OK: {price_change_sufficient}")
+            
+            signal_action = 'WAIT'
+            signal_strength = 0.0
+            signal_reasons = []
+            
+            if buy_valid and body_sufficient and price_change_sufficient:
+                signal_action = 'BUY'
+                signal_strength = min(body_ratio * 2, 1.0)
+                signal_reasons.append("🟢 Green candle with higher close")
+                
+            elif sell_valid and body_sufficient and price_change_sufficient:
+                signal_action = 'SELL'
+                signal_strength = min(body_ratio * 2, 1.0)
+                signal_reasons.append("🔴 Red candle with lower close")
+            
+            else:
+                reasons = []
+                if not (buy_valid or sell_valid):
+                    reasons.append("No valid pattern")
+                if not body_sufficient:
+                    reasons.append(f"Body too small ({body_ratio*100:.1f}%)")
+                if not price_change_sufficient:
+                    reasons.append(f"Price change too small")
+                return self._create_wait_signal("; ".join(reasons))
+            
+            # ตรวจสอบ minimum strength
+            min_strength = self.signal_strength_config.get('min_signal_strength', 0.6)
+            if signal_strength < min_strength:
+                return self._create_wait_signal(f"Signal weak ({signal_strength:.2f})")
+            
+            # บันทึกว่าส่ง signal สำหรับลายเซ็นนี้แล้ว
+            self._mark_signal_sent_for_signature(candle_signature)
+            
+            print(f"✅ SIGNAL APPROVED FOR SIGNATURE")
+            print(f"   Action: {signal_action}")
+            print(f"   Strength: {signal_strength:.3f}")
+            
+            signal_data = {
+                'action': signal_action,
+                'strength': signal_strength,
+                'confidence': signal_strength,
+                'timestamp': datetime.now(),
+                'candle_time': candle_time,
+                'candle_signature': candle_signature,
+                'reasons': signal_reasons,
+                'candle_color': candle_color,
+                'body_ratio': body_ratio,
+                'close': current_close,
+                'previous_close': previous_close,
+                'price_change': current_close - previous_close,
+                'signal_id': f"{signal_action}_{datetime.now().strftime('%H%M%S')}",
+                'tracking_method': 'signature_based'
+            }
+            
+            return signal_data
             
         except Exception as e:
-            print(f"Signal generation error: {e}")
+            print(f"❌ Signature tracking signal error: {e}")
             return self._create_wait_signal(f"Error: {str(e)}")
 
-    def _evaluate_buy_conditions(self, data: Dict) -> Dict:
-        """
-        DEBUG BUY CONDITIONS
-        """
+    def _is_signal_sent_for_signature(self, signature: str) -> bool:
+        """🔍 เช็คว่าลายเซ็นนี้ส่ง signal แล้วหรือยัง"""
+        return signature in self.signal_signatures
+
+    def _mark_signal_sent_for_signature(self, signature: str):
+        """✅ บันทึกว่าส่ง signal สำหรับลายเซ็นนี้แล้ว"""
         try:
-            print(f"🟢 Evaluating BUY conditions:")
+            self.signal_signatures.add(signature)
             
-            conditions_met = {}
-            total_score = 0.0
-            max_score = 0.0
-            
-            # 1. Candle Color Check
-            color_weight = self.signal_strength_config.get('candle_color_weight', 0.3)
-            max_score += color_weight
-            candle_color = data.get('candle_color')
-            
-            print(f"   1. Candle Color: {candle_color} (need: green)")
-            if candle_color == 'green':
-                conditions_met['candle_color'] = True
-                total_score += color_weight
-                print(f"      ✅ PASS: Green candle (+{color_weight})")
-            else:
-                conditions_met['candle_color'] = False
-                print(f"      ❌ FAIL: Not green candle")
-            
-            # 2. Price Direction Check  
-            direction_weight = self.signal_strength_config.get('price_direction_weight', 0.3)
-            max_score += direction_weight
-            price_direction = data.get('price_direction')
-            current_close = data.get('close', 0)
-            previous_close = data.get('previous_close', 0)
-            
-            print(f"   2. Price Direction: {price_direction} (need: higher_close)")
-            print(f"      Current close: {current_close:.2f}")
-            print(f"      Previous close: {previous_close:.2f}")
-            print(f"      Difference: {current_close - previous_close:+.2f}")
-            
-            if price_direction == 'higher_close':
-                conditions_met['price_direction'] = True
-                total_score += direction_weight
-                print(f"      ✅ PASS: Higher close (+{direction_weight})")
-            else:
-                conditions_met['price_direction'] = False
-                print(f"      ❌ FAIL: Not higher close")
-            
-            # 3. Body Ratio Check
-            body_weight = self.signal_strength_config.get('body_ratio_weight', 0.4)
-            max_score += body_weight
-            body_ratio = data.get('body_ratio', 0)
-            min_body_ratio = self.buy_conditions.get('min_body_ratio', 0.1)
-            
-            print(f"   3. Body Ratio: {body_ratio:.3f} (need: >= {min_body_ratio})")
-            if body_ratio >= min_body_ratio:
-                conditions_met['body_ratio'] = True
-                body_score = min(body_ratio * 2, 1.0) * body_weight
-                total_score += body_score
-                print(f"      ✅ PASS: Sufficient body ratio (+{body_score:.3f})")
-            else:
-                conditions_met['body_ratio'] = False
-                print(f"      ❌ FAIL: Body ratio too small")
-            
-            # 4. Volume Check (optional)
-            volume_confirmation_required = self.buy_conditions.get('volume_confirmation', False)
-            print(f"   4. Volume Confirmation: required={volume_confirmation_required}")
-            
-            if volume_confirmation_required:
-                volume_factor = data.get('volume_factor', 1.0)
-                volume_threshold = self.buy_conditions.get('volume_factor_threshold', 1.2)
-                print(f"      Volume factor: {volume_factor:.2f} (need: >= {volume_threshold})")
+            # เก็บแค่ N signal ล่าสุด
+            if len(self.signal_signatures) > self.max_signal_history:
+                # ลบ signal เก่าที่สุด
+                sorted_signatures = sorted(self.signal_signatures, 
+                                         key=lambda x: int(x.split('_')[0]))
+                oldest_signature = sorted_signatures[0]
+                self.signal_signatures.remove(oldest_signature)
                 
-                if volume_factor >= volume_threshold:
-                    conditions_met['volume_confirmation'] = True
-                    print(f"      ✅ PASS: Volume confirmed")
-                else:
-                    conditions_met['volume_confirmation'] = False
-                    print(f"      ❌ FAIL: Volume not confirmed")
-            else:
-                conditions_met['volume_confirmation'] = True
-                print(f"      ℹ️ SKIP: Volume confirmation not required")
+            self.last_signal_signature = signature
             
-            # คำนวณ signal strength
-            signal_strength = total_score / max_score if max_score > 0 else 0
-            
-            # ตรวจสอบว่าเงื่อนไขหลักผ่านหรือไม่
-            core_conditions_met = (
-                conditions_met.get('candle_color', False) and
-                conditions_met.get('price_direction', False) and
-                conditions_met.get('body_ratio', False) and
-                conditions_met.get('volume_confirmation', True)
-            )
-            
-            print(f"   SUMMARY:")
-            print(f"      Core conditions passed: {core_conditions_met}")
-            print(f"      Signal strength: {signal_strength:.3f}")
-            print(f"      Score: {total_score:.3f}/{max_score:.3f}")
-            
-            return {
-                'signal_type': 'BUY',
-                'conditions_met': conditions_met,
-                'core_conditions_passed': core_conditions_met,
-                'signal_strength': signal_strength,
-                'total_score': total_score,
-                'max_score': max_score,
-                'reasons': self._get_buy_reasons(conditions_met, data)
-            }
+            print(f"✅ Signal marked for signature")
+            print(f"   Total signals sent: {len(self.signal_signatures)}")
             
         except Exception as e:
-            print(f"BUY conditions evaluation error: {e}")
-            return {
-                'signal_type': 'BUY',
-                'core_conditions_passed': False,
-                'signal_strength': 0.0,
-                'error': str(e)
-            }
+            print(f"❌ Mark signal signature error: {e}")
 
     def _evaluate_sell_conditions(self, data: Dict) -> Dict:
         """
-        DEBUG SELL CONDITIONS
+        🔴 ประเมินเงื่อนไข SELL - FINAL FIXED VERSION
         """
         try:
-            print(f"🔴 Evaluating SELL conditions:")
+            print(f"🔴 === SELL CONDITIONS (FINAL FIXED) ===")
             
-            conditions_met = {}
-            total_score = 0.0
-            max_score = 0.0
-            
-            # 1. Candle Color Check
-            color_weight = self.signal_strength_config.get('candle_color_weight', 0.3)
-            max_score += color_weight
             candle_color = data.get('candle_color')
-            
-            print(f"   1. Candle Color: {candle_color} (need: red)")
-            if candle_color == 'red':
-                conditions_met['candle_color'] = True
-                total_score += color_weight
-                print(f"      ✅ PASS: Red candle (+{color_weight})")
-            else:
-                conditions_met['candle_color'] = False
-                print(f"      ❌ FAIL: Not red candle")
-            
-            # 2. Price Direction Check  
-            direction_weight = self.signal_strength_config.get('price_direction_weight', 0.3)
-            max_score += direction_weight
-            price_direction = data.get('price_direction')
-            current_close = data.get('close', 0)
-            previous_close = data.get('previous_close', 0)
-            
-            print(f"   2. Price Direction: {price_direction} (need: lower_close)")
-            print(f"      Current close: {current_close:.2f}")
-            print(f"      Previous close: {previous_close:.2f}")
-            print(f"      Difference: {current_close - previous_close:+.2f}")
-            
-            if price_direction == 'lower_close':
-                conditions_met['price_direction'] = True
-                total_score += direction_weight
-                print(f"      ✅ PASS: Lower close (+{direction_weight})")
-            else:
-                conditions_met['price_direction'] = False
-                print(f"      ❌ FAIL: Not lower close")
-            
-            # 3. Body Ratio Check
-            body_weight = self.signal_strength_config.get('body_ratio_weight', 0.4)
-            max_score += body_weight
-            body_ratio = data.get('body_ratio', 0)
+            current_close = float(data.get('close', 0))
+            previous_close = float(data.get('previous_close', 0))
+            body_ratio = float(data.get('body_ratio', 0))
             min_body_ratio = self.sell_conditions.get('min_body_ratio', 0.1)
             
-            print(f"   3. Body Ratio: {body_ratio:.3f} (need: >= {min_body_ratio})")
-            if body_ratio >= min_body_ratio:
-                conditions_met['body_ratio'] = True
-                body_score = min(body_ratio * 2, 1.0) * body_weight
-                total_score += body_score
-                print(f"      ✅ PASS: Sufficient body ratio (+{body_score:.3f})")
-            else:
-                conditions_met['body_ratio'] = False
-                print(f"      ❌ FAIL: Body ratio too small")
+            # 🔧 FINAL FIX: การเปรียบเทียบที่ชัดเจน
+            condition_1 = (candle_color == 'red')
+            condition_2 = (current_close < previous_close)
+            condition_3 = (body_ratio >= min_body_ratio)
             
-            # 4. Volume Check (optional)
-            volume_confirmation_required = self.sell_conditions.get('volume_confirmation', False)
-            print(f"   4. Volume Confirmation: required={volume_confirmation_required}")
+            print(f"   1. Red candle: {condition_1} (color: {candle_color})")
+            print(f"   2. Lower close: {condition_2}")
+            print(f"      → Current: {current_close:.4f}")
+            print(f"      → Previous: {previous_close:.4f}")
+            print(f"      → {current_close:.4f} < {previous_close:.4f} = {condition_2}")
+            print(f"   3. Body sufficient: {condition_3} ({body_ratio:.3f} >= {min_body_ratio})")
             
-            if volume_confirmation_required:
-                volume_factor = data.get('volume_factor', 1.0)
-                volume_threshold = self.sell_conditions.get('volume_factor_threshold', 1.2)
-                print(f"      Volume factor: {volume_factor:.2f} (need: >= {volume_threshold})")
-                
-                if volume_factor >= volume_threshold:
-                    conditions_met['volume_confirmation'] = True
-                    print(f"      ✅ PASS: Volume confirmed")
-                else:
-                    conditions_met['volume_confirmation'] = False
-                    print(f"      ❌ FAIL: Volume not confirmed")
-            else:
-                conditions_met['volume_confirmation'] = True
-                print(f"      ℹ️ SKIP: Volume confirmation not required")
+            all_conditions_met = condition_1 and condition_2 and condition_3
+            signal_strength = min(body_ratio * 2, 1.0) if all_conditions_met else 0.0
             
-            # คำนวณ signal strength
-            signal_strength = total_score / max_score if max_score > 0 else 0
-            
-            # ตรวจสอบว่าเงื่อนไขหลักผ่านหรือไม่
-            core_conditions_met = (
-                conditions_met.get('candle_color', False) and
-                conditions_met.get('price_direction', False) and
-                conditions_met.get('body_ratio', False) and
-                conditions_met.get('volume_confirmation', True)
-            )
-            
-            print(f"   SUMMARY:")
-            print(f"      Core conditions passed: {core_conditions_met}")
-            print(f"      Signal strength: {signal_strength:.3f}")
-            print(f"      Score: {total_score:.3f}/{max_score:.3f}")
+            print(f"   → ALL CONDITIONS: {all_conditions_met}")
+            print(f"   → STRENGTH: {signal_strength:.3f}")
             
             return {
                 'signal_type': 'SELL',
-                'conditions_met': conditions_met,
-                'core_conditions_passed': core_conditions_met,
+                'core_conditions_passed': all_conditions_met,
                 'signal_strength': signal_strength,
-                'total_score': total_score,
-                'max_score': max_score,
-                'reasons': self._get_sell_reasons(conditions_met, data)
+                'conditions_detail': {
+                    'red_candle': condition_1,
+                    'lower_close': condition_2,
+                    'body_sufficient': condition_3
+                }
             }
             
         except Exception as e:
-            print(f"SELL conditions evaluation error: {e}")
+            print(f"❌ SELL conditions error: {e}")
             return {
                 'signal_type': 'SELL',
                 'core_conditions_passed': False,
                 'signal_strength': 0.0,
                 'error': str(e)
             }
+
+    def _evaluate_buy_conditions(self, data: Dict) -> Dict:
+        """
+        🟢 ประเมินเงื่อนไข BUY - FINAL FIXED VERSION
+        """
+        try:
+            print(f"🟢 === BUY CONDITIONS (FINAL FIXED) ===")
+            
+            candle_color = data.get('candle_color')
+            current_close = float(data.get('close', 0))
+            previous_close = float(data.get('previous_close', 0))
+            body_ratio = float(data.get('body_ratio', 0))
+            min_body_ratio = self.buy_conditions.get('min_body_ratio', 0.1)
+            
+            # 🔧 FINAL FIX: การเปรียบเทียบที่ชัดเจน
+            condition_1 = (candle_color == 'green')
+            condition_2 = (current_close > previous_close)
+            condition_3 = (body_ratio >= min_body_ratio)
+            
+            print(f"   1. Green candle: {condition_1} (color: {candle_color})")
+            print(f"   2. Higher close: {condition_2}")
+            print(f"      → Current: {current_close:.4f}")
+            print(f"      → Previous: {previous_close:.4f}")
+            print(f"      → {current_close:.4f} > {previous_close:.4f} = {condition_2}")
+            print(f"   3. Body sufficient: {condition_3} ({body_ratio:.3f} >= {min_body_ratio})")
+            
+            all_conditions_met = condition_1 and condition_2 and condition_3
+            signal_strength = min(body_ratio * 2, 1.0) if all_conditions_met else 0.0
+            
+            print(f"   → ALL CONDITIONS: {all_conditions_met}")
+            print(f"   → STRENGTH: {signal_strength:.3f}")
+            
+            return {
+                'signal_type': 'BUY',
+                'core_conditions_passed': all_conditions_met,
+                'signal_strength': signal_strength,
+                'conditions_detail': {
+                    'green_candle': condition_1,
+                    'higher_close': condition_2,
+                    'body_sufficient': condition_3
+                }
+            }
+            
+        except Exception as e:
+            print(f"❌ BUY conditions error: {e}")
+            return {
+                'signal_type': 'BUY',
+                'core_conditions_passed': False,
+                'signal_strength': 0.0,
+                'error': str(e)
+            }
+        
+    def _get_buy_reasons_simple(self, green_candle: bool, higher_close: bool, body_ok: bool, data: Dict) -> List[str]:
+        """📝 สร้างเหตุผล BUY signal แบบง่าย"""
+        reasons = []
+        
+        if green_candle:
+            reasons.append("🟢 Bullish green candle")
+        
+        if higher_close:
+            current = data.get('close', 0)
+            previous = data.get('previous_close', 0)
+            reasons.append(f"📈 Higher close: ${previous:.2f} → ${current:.2f}")
+        
+        if body_ok:
+            body_ratio = data.get('body_ratio', 0)
+            reasons.append(f"💪 Strong body: {body_ratio*100:.1f}%")
+        
+        return reasons
+
+    def _get_sell_reasons_simple(self, red_candle: bool, lower_close: bool, body_ok: bool, data: Dict) -> List[str]:
+        """📝 สร้างเหตุผล SELL signal แบบง่าย"""
+        reasons = []
+        
+        if red_candle:
+            reasons.append("🔴 Bearish red candle")
+        
+        if lower_close:
+            current = data.get('close', 0)
+            previous = data.get('previous_close', 0)
+            reasons.append(f"📉 Lower close: ${previous:.2f} → ${current:.2f}")
+        
+        if body_ok:
+            body_ratio = data.get('body_ratio', 0)
+            reasons.append(f"💪 Strong body: {body_ratio*100:.1f}%")
+        
+        return reasons
             
     def _decide_final_signal(self, buy_data: Dict, sell_data: Dict, candlestick_data: Dict) -> Dict:
         """

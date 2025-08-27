@@ -58,7 +58,11 @@ class CandlestickAnalyzer:
         # Volume data
         self.volume_available = False
         self.volume_history = []
-        
+                
+        # NEW: ใช้ sequence tracking แทน time tracking
+        self.last_candle_signature = None  # ลายเซ็นของแท่งล่าสุด (OHLC + time)
+        self.processed_signatures = set()  # เก็บลายเซ็นที่ประมวลผลแล้ว
+        self.max_signature_history = 50
         print(f"🕯️ Real-time Candlestick Analyzer initialized for {self.symbol}")
         print(f"   Will detect new candles immediately upon close")
     
@@ -68,75 +72,60 @@ class CandlestickAnalyzer:
     
     def get_current_analysis(self) -> Optional[Dict]:
         """
-        📊 ตรวจจับและวิเคราะห์แท่งที่เพิ่งปิดใหม่ - FORCE DETECTION MODE
-        
-        Returns:
-            Dict: ผลการวิเคราะห์ หรือ None ถ้ายังไม่มีแท่งใหม่
+        📊 วิเคราะห์แท่งใหม่ - SEQUENCE TRACKING VERSION
         """
         try:
-            # ตรวจสอบการเชื่อมต่อ
+            print(f"🔍 === SEQUENCE TRACKING ANALYSIS ===")
+            
             if not self.mt5_connector.is_connected:
-                print(f"❌ MT5 not connected - cannot analyze")
+                print(f"❌ MT5 not connected")
                 return None
             
-            print(f"🔍 === CANDLESTICK ANALYSIS CYCLE ===")
+            # ดึงแท่งที่ปิดแล้ว
+            closed_candle_data = self._get_latest_closed_candle()
+            if not closed_candle_data:
+                return None
             
-            # 🔧 IMPROVED: ตรวจจับแท่งใหม่แบบ aggressive
-            new_closed_candle = self._detect_new_closed_candle()
+            current_candle = closed_candle_data['current']
+            previous_candle = closed_candle_data['previous']
             
-            if not new_closed_candle:
-                print(f"⏳ No new candle detected - using cache if available")
-                # ส่งคืน cache หรือ None
-                if self._is_cache_valid() and self.cached_analysis:
-                    cached = self.cached_analysis.copy()
-                    cached['is_cached'] = True
-                    cached['has_new_candle'] = False
-                    print(f"📋 Returning cached analysis")
-                    return cached
-                else:
-                    print(f"❌ No cached data available")
-                    return None
+            # สร้างลายเซ็นของแท่ง (ใช้ OHLC + timestamp)
+            candle_signature = self._create_candle_signature(current_candle)
             
-            # มีแท่งใหม่! - วิเคราะห์ทันที
-            print(f"🕯️ === NEW CANDLE ANALYSIS START ===")
+            # เช็คว่าแท่งนี้ประมวลผลแล้วหรือยัง
+            if self._is_signature_processed(candle_signature):
+                print(f"⏳ Candle signature already processed")
+                print(f"   OHLC: {current_candle['open']:.2f}/{current_candle['high']:.2f}/{current_candle['low']:.2f}/{current_candle['close']:.2f}")
+                return None
             
-            current_candle = new_closed_candle['current']
-            previous_candle = new_closed_candle['previous']
-            
-            # ดึงข้อมูล volume
-            volume_data = self._get_volume_analysis()
+            print(f"🆕 NEW CANDLE SIGNATURE DETECTED")
+            print(f"   Time: {current_candle['time'].strftime('%H:%M:%S')}")
+            print(f"   OHLC: {current_candle['open']:.4f}/{current_candle['high']:.4f}/{current_candle['low']:.4f}/{current_candle['close']:.4f}")
             
             # วิเคราะห์แท่งเทียน
             candlestick_analysis = self._analyze_candlestick(current_candle, previous_candle)
+            volume_data = self._get_volume_analysis()
             
             # รวมข้อมูลทั้งหมด
             complete_analysis = {
-                # OHLC data
                 'symbol': self.symbol,
                 'timestamp': datetime.now(),
                 'candle_time': current_candle['time'],
+                'candle_signature': candle_signature,
                 'open': current_candle['open'],
                 'high': current_candle['high'],
                 'low': current_candle['low'],
                 'close': current_candle['close'],
                 'previous_close': previous_candle['close'],
                 
-                # 🔧 NEW: ข้อมูลการตรวจจับ
-                'has_new_candle': True,
-                'is_fresh_analysis': True,
-                'candle_close_time': current_candle['time'],
-                'detection_method': 'real_time',
+                # Tracking info
+                'is_new_candle': True,
+                'tracking_method': 'sequence_signature',
                 
                 # Candlestick analysis
                 'candle_color': candlestick_analysis['color'],
                 'body_ratio': candlestick_analysis['body_ratio'],
                 'price_direction': candlestick_analysis['price_direction'],
-                'candle_range': candlestick_analysis['range'],
-                'body_size': candlestick_analysis['body_size'],
-                'upper_wick': candlestick_analysis['upper_wick'],
-                'lower_wick': candlestick_analysis['lower_wick'],
-                
-                # Pattern recognition
                 'pattern_name': candlestick_analysis['pattern_name'],
                 'pattern_strength': candlestick_analysis['pattern_strength'],
                 
@@ -149,141 +138,38 @@ class CandlestickAnalyzer:
                 # Market context
                 'market_context': self._get_market_context(current_candle),
                 'analysis_strength': self._calculate_analysis_strength(candlestick_analysis, volume_data),
-                
-                # Metadata
-                'timeframe': 'M5',
-                'analysis_time': datetime.now(),
-                'is_cached': False
             }
             
-            # 🔧 IMPROVED: อัพเดท tracking
-            self.cached_analysis = complete_analysis.copy()
-            self.last_analysis_time = datetime.now()
-            self.last_analyzed_candle_time = current_candle['time']
-            self.cache_duration_seconds = 240  # 4 minutes cache
+            # บันทึกลายเซ็นว่าประมวลผลแล้ว
+            self._mark_signature_processed(candle_signature)
             
-            print(f"✅ === FRESH ANALYSIS COMPLETED ===")
-            print(f"   Signal ready for: {candlestick_analysis['color']} candle")
-            print(f"   Price direction: {candlestick_analysis['price_direction']}")
-            print(f"   Body ratio: {candlestick_analysis['body_ratio']:.3f}")
-            print(f"   Pattern: {candlestick_analysis['pattern_name']}")
-            print(f"   Cached until: {(datetime.now() + timedelta(seconds=240)).strftime('%H:%M:%S')}")
+            print(f"✅ SEQUENCE ANALYSIS COMPLETED")
+            print(f"   Color: {candlestick_analysis['color']}")
+            print(f"   Price Direction: {candlestick_analysis['price_direction']}")
+            print(f"   Body Ratio: {candlestick_analysis['body_ratio']:.3f}")
             
             return complete_analysis
             
         except Exception as e:
-            print(f"❌ Current analysis error: {e}")
+            print(f"❌ Sequence tracking analysis error: {e}")
             return None
-            
-    def _detect_new_closed_candle(self) -> Optional[Dict]:
+
+    def _get_latest_closed_candle(self) -> Optional[Dict]:
         """
-        🔍 ตรวจจับแท่งใหม่ที่เพิ่งปิด - IMPROVED DETECTION
-        
-        Returns:
-            Dict: ข้อมูลแท่งใหม่ หรือ None ถ้าไม่มีแท่งใหม่
+        📊 ดึงแท่งที่ปิดล่าสุด
         """
         try:
-            # ดึงข้อมูล 3 แท่งล่าสุดที่ปิดแล้ว (เพิ่มขึ้นเพื่อความแม่นยำ)
-            rates = mt5.copy_rates_from_pos(self.symbol, self.timeframe, 1, 3)
+            # ดึงข้อมูล 3 แท่งล่าสุด
+            rates = mt5.copy_rates_from_pos(self.symbol, self.timeframe, 0, 3)
             
-            if rates is None or len(rates) < 2:
-                print(f"❌ Cannot get rate data for new candle detection")
+            if rates is None or len(rates) < 3:
+                print(f"❌ Cannot get sufficient candle data")
                 return None
             
-            # แปลงข้อมูล
-            current_raw = rates[0]  # แท่งที่ปิดล่าสุด
-            current_time = datetime.fromtimestamp(int(current_raw['time']))
+            # Index 1 = แท่งที่ปิดล่าสุด, Index 2 = แท่งก่อนหน้า
+            current_raw = rates[1]
+            previous_raw = rates[2]
             
-            print(f"🔍 Checking candle at {current_time.strftime('%H:%M:%S')}")
-            
-            # 🔧 IMPROVED: เช็คการเปลี่ยนแปลงแท่งแบบละเอียด
-            is_new_candle = False
-            
-            if hasattr(self, 'last_analyzed_candle_time'):
-                time_diff = (current_time - self.last_analyzed_candle_time).total_seconds()
-                print(f"   Time diff from last analysis: {time_diff:.0f} seconds")
-                
-                # แท่งใหม่ต้องมาหลังจากแท่งเดิมอย่างน้อย 4 นาที
-                if time_diff >= 240:  # 4 minutes
-                    is_new_candle = True
-                    print(f"   ✅ NEW CANDLE: Time difference sufficient")
-                else:
-                    print(f"   ⏳ Same candle: Time difference too small ({time_diff:.0f}s)")
-                    return None
-            else:
-                # ยังไม่เคยวิเคราะห์ - ถือว่าแท่งใหม่
-                is_new_candle = True
-                print(f"   ✅ FIRST ANALYSIS: Treating as new candle")
-            
-            # ตรวจสอบอายุแท่ง (ไม่เก่าเกิน 15 นาที)
-            candle_age_minutes = (datetime.now() - current_time).total_seconds() / 60
-            if candle_age_minutes > 15:
-                print(f"   ❌ Candle too old: {candle_age_minutes:.1f} minutes")
-                return None
-            
-            # เตรียมข้อมูลแท่ง
-            current_candle = {
-                'time': current_time,
-                'open': float(current_raw['open']),
-                'high': float(current_raw['high']),
-                'low': float(current_raw['low']),
-                'close': float(current_raw['close']),
-                'volume': int(current_raw['tick_volume']) if 'tick_volume' in current_raw.dtype.names else 0
-            }
-            
-            previous_raw = rates[1]
-            previous_candle = {
-                'time': datetime.fromtimestamp(int(previous_raw['time'])),
-                'open': float(previous_raw['open']),
-                'high': float(previous_raw['high']),
-                'low': float(previous_raw['low']),
-                'close': float(previous_raw['close']),
-                'volume': int(previous_raw['tick_volume']) if 'tick_volume' in previous_raw.dtype.names else 0
-            }
-            
-            # 🔧 IMPROVED: แสดงข้อมูลเปรียบเทียบ
-            price_change = current_candle['close'] - previous_candle['close']
-            candle_color = 'green' if current_candle['close'] > current_candle['open'] else 'red'
-            price_direction = 'higher' if price_change > 0 else 'lower'
-            
-            print(f"🆕 NEW CANDLE CONFIRMED:")
-            print(f"   Time: {current_time.strftime('%H:%M:%S')} (Age: {candle_age_minutes:.1f}m)")
-            print(f"   OHLC: {current_candle['open']:.2f}/{current_candle['high']:.2f}/{current_candle['low']:.2f}/{current_candle['close']:.2f}")
-            print(f"   Color: {candle_color}")
-            print(f"   Direction: {price_direction} ({price_change:+.2f})")
-            print(f"   Range: {current_candle['high'] - current_candle['low']:.2f}")
-            
-            return {
-                'current': current_candle,
-                'previous': previous_candle,
-                'is_new_candle': True,
-                'detection_time': datetime.now(),
-                'candle_age_minutes': candle_age_minutes,
-                'price_change': price_change,
-                'candle_color': candle_color
-            }
-            
-        except Exception as e:
-            print(f"❌ New candle detection error: {e}")
-            return None
-    
-    def _get_ohlc_data(self) -> Optional[Dict]:
-        """
-        📊 ดึงข้อมูล OHLC แท่งที่ปิดแล้วเท่านั้น - FIXED TIME CALCULATION
-        
-        Returns:
-            Dict: ข้อมูล current (แท่งที่ปิดล่าสุด) และ previous candle
-        """
-        try:
-            # 🔧 FIXED: ดึงข้อมูล 3 แท่งล่าสุด แต่ข้าม index 0 (แท่งปัจจุบันที่ยังไม่ปิด)
-            rates = mt5.copy_rates_from_pos(self.symbol, self.timeframe, 1, 2)  # เริ่มจาก index 1, เอา 2 แท่ง
-            
-            if rates is None or len(rates) < 2:
-                print(f"❌ Cannot get sufficient closed candle data for {self.symbol}")
-                return None
-            
-            # แปลง numpy array เป็น dict - ใช้แท่งที่ปิดแล้วเท่านั้น
-            current_raw = rates[0]  # แท่งที่ปิดล่าสุด
             current_candle = {
                 'time': datetime.fromtimestamp(int(current_raw['time'])),
                 'open': float(current_raw['open']),
@@ -293,7 +179,6 @@ class CandlestickAnalyzer:
                 'volume': int(current_raw['tick_volume']) if 'tick_volume' in current_raw.dtype.names else 0
             }
             
-            previous_raw = rates[1]  # แท่งก่อนหน้า
             previous_candle = {
                 'time': datetime.fromtimestamp(int(previous_raw['time'])),
                 'open': float(previous_raw['open']),
@@ -303,67 +188,94 @@ class CandlestickAnalyzer:
                 'volume': int(previous_raw['tick_volume']) if 'tick_volume' in previous_raw.dtype.names else 0
             }
             
-            # 🔧 FIXED: การคำนวณเวลาแท่งปิด - ลบการเช็คที่ไม่จำเป็น
-            now = datetime.now()
-            
-            # เช็คว่าแท่งนี้เก่าเกินไปหรือไม่ (เก่ากว่า 10 นาที = ไม่ current)
-            candle_age_minutes = (now - current_candle['time']).total_seconds() / 60
-            
-            # 🔧 FIXED: ไม่ต้องรอแท่งปิด เพราะเราดึงแท่งที่ปิดแล้วมา
-            # แค่เช็คว่าข้อมูลไม่เก่าเกินไป
-            if candle_age_minutes > 15:  # ถ้าข้อมูลเก่ากว่า 15 นาที
-                print(f"⚠️ Candle data too old: {candle_age_minutes:.1f} minutes")
+            # เช็คอายุแท่ง (ไม่เก่าเกิน 15 นาที)
+            candle_age = (datetime.now() - current_candle['time']).total_seconds() / 60
+            if candle_age > 15:
+                print(f"⚠️ Candle too old: {candle_age:.1f} minutes")
                 return None
-            
-            print(f"📊 Using CLOSED candles (Age: {candle_age_minutes:.1f}m):")
-            print(f"   Current: ${current_candle['close']:.2f} at {current_candle['time'].strftime('%H:%M:%S')}")
-            print(f"   Previous: ${previous_candle['close']:.2f} at {previous_candle['time'].strftime('%H:%M:%S')}")
-            
-            # คำนวณการเปลี่ยนแปลงราคา
-            price_change = current_candle['close'] - previous_candle['close']
-            price_change_pips = price_change * 100  # สำหรับทองคำ
-            
-            print(f"   Price change: {price_change:+.2f} ({price_change_pips:+.1f} pips)")
             
             return {
                 'current': current_candle,
-                'previous': previous_candle,
-                'timestamp': datetime.now(),
-                'is_closed_candle': True,
-                'candle_age_minutes': candle_age_minutes
+                'previous': previous_candle
             }
             
         except Exception as e:
-            print(f"❌ OHLC closed data error: {e}")
+            print(f"❌ Get closed candle error: {e}")
             return None
-            
-    def _analyze_candlestick(self, current: Dict, previous: Dict) -> Dict:
+
+    def _create_candle_signature(self, candle: Dict) -> str:
         """
-        🕯️ วิเคราะห์แท่งเทียนปัจจุบัน - IMPROVED ACCURACY
-        
-        Args:
-            current: ข้อมูลแท่งปัจจุบัน
-            previous: ข้อมูลแท่งก่อนหน้า
-            
-        Returns:
-            Dict: ผลการวิเคราะห์แท่งเทียนที่แม่นยำ
+        🔑 สร้างลายเซ็นของแท่งเทียน
+        ใช้ OHLC + timestamp เป็น unique identifier
         """
         try:
+            # สร้างลายเซ็นจาก OHLC + timestamp
+            o = round(candle['open'], 4)
+            h = round(candle['high'], 4)
+            l = round(candle['low'], 4)
+            c = round(candle['close'], 4)
+            t = int(candle['time'].timestamp())
+            
+            signature = f"{t}_{o}_{h}_{l}_{c}"
+            
+            print(f"🔑 Candle signature: {signature}")
+            return signature
+            
+        except Exception as e:
+            print(f"❌ Create signature error: {e}")
+            return "error_signature"
+
+    def _is_signature_processed(self, signature: str) -> bool:
+        """🔍 เช็คว่าลายเซ็นนี้ประมวลผลแล้วหรือยัง"""
+        return signature in self.processed_signatures
+
+    def _mark_signature_processed(self, signature: str):
+        """✅ บันทึกลายเซ็นว่าประมวลผลแล้ว"""
+        try:
+            self.processed_signatures.add(signature)
+            
+            # เก็บแค่ N ลายเซ็นล่าสุด
+            if len(self.processed_signatures) > self.max_signature_history:
+                # ลบลายเซ็นเก่าที่สุด (เรียงตาม timestamp ใน signature)
+                sorted_signatures = sorted(self.processed_signatures, 
+                                         key=lambda x: int(x.split('_')[0]))
+                oldest_signature = sorted_signatures[0]
+                self.processed_signatures.remove(oldest_signature)
+                
+            self.last_candle_signature = signature
+            
+            print(f"✅ Signature marked as processed")
+            print(f"   Total processed: {len(self.processed_signatures)}")
+            
+        except Exception as e:
+            print(f"❌ Mark signature error: {e}")
+            
+
+    def _analyze_candlestick(self, current: Dict, previous: Dict) -> Dict:
+        """
+        🕯️ วิเคราะห์แท่งเทียน - IMPROVED WITH FIXED DATA
+        """
+        try:
+            # 🔧 FIXED: ใช้ข้อมูลที่ถูกต้อง
             o, h, l, c = current['open'], current['high'], current['low'], current['close']
             prev_close = previous['close']
             prev_open = previous['open']
             prev_high = previous['high']
             prev_low = previous['low']
             
-            # 🔧 IMPROVED: คำนวณขนาดต่างๆ แบบแม่นยำ
+            print(f"🕯️ === CANDLESTICK ANALYSIS (FIXED) ===")
+            print(f"   Current OHLC: {o:.4f}/{h:.4f}/{l:.4f}/{c:.4f}")
+            print(f"   Previous OHLC: {prev_open:.4f}/{prev_high:.4f}/{prev_low:.4f}/{prev_close:.4f}")
+            
+            # คำนวณขนาดต่างๆ
             candle_range = h - l
             body_size = abs(c - o)
             
             # ป้องกัน division by zero
-            body_ratio = body_size / candle_range if candle_range > 0.001 else 0
+            body_ratio = body_size / candle_range if candle_range > 0.0001 else 0
             
-            # 🔧 IMPROVED: กำหนดสีแท่งเทียนแบบแม่นยำ
-            price_threshold = 0.001  # 0.1 pips สำหรับทองคำ
+            # กำหนดสีแท่งเทียน
+            price_threshold = 0.0001  # threshold สำหรับทองคำ
             
             if c > o + price_threshold:
                 candle_color = 'green'  # bullish
@@ -372,7 +284,7 @@ class CandlestickAnalyzer:
             else:
                 candle_color = 'doji'   # เกือบเท่ากัน
             
-            # 🔧 IMPROVED: ทิศทางราคาแบบแม่นยำ
+            # ทิศทางราคาเทียบกับแท่งก่อนหน้า
             price_change = c - prev_close
             if abs(price_change) < price_threshold:
                 price_direction = 'same_close'
@@ -381,32 +293,22 @@ class CandlestickAnalyzer:
             else:
                 price_direction = 'lower_close'
             
-            # 🔧 IMPROVED: คำนวณ wicks แบบถูกต้อง
+            # คำนวณ wicks
             if candle_color == 'green':
                 upper_wick = h - c
                 lower_wick = o - l
-                body_top = c
-                body_bottom = o
             elif candle_color == 'red':
                 upper_wick = h - o
                 lower_wick = c - l
-                body_top = o
-                body_bottom = c
             else:  # doji
-                body_mid = (o + c) / 2
                 upper_wick = h - max(o, c)
                 lower_wick = min(o, c) - l
-                body_top = max(o, c)
-                body_bottom = min(o, c)
             
-            # 🔧 IMPROVED: คำนวณ wick ratios
+            # คำนวณ wick ratios
             upper_wick_ratio = upper_wick / candle_range if candle_range > 0 else 0
             lower_wick_ratio = lower_wick / candle_range if candle_range > 0 else 0
             
-            # 🔧 IMPROVED: เพิ่มการวิเคราะห์ momentum
-            momentum_score = self._calculate_momentum(current, previous)
-            
-            # 🔧 IMPROVED: Pattern recognition ที่แม่นยำขึ้น
+            # Pattern recognition
             pattern_info = self._recognize_advanced_patterns({
                 'color': candle_color,
                 'body_ratio': body_ratio,
@@ -416,12 +318,8 @@ class CandlestickAnalyzer:
                 'lower_wick_ratio': lower_wick_ratio,
                 'candle_range': candle_range,
                 'body_size': body_size,
-                'momentum': momentum_score,
                 'price_change': price_change
             })
-            
-            # 🔧 IMPROVED: เพิ่มการวิเคราะห์ relative strength
-            relative_strength = self._calculate_relative_strength(current, previous)
             
             analysis_result = {
                 'color': candle_color,
@@ -433,108 +331,29 @@ class CandlestickAnalyzer:
                 'lower_wick': round(lower_wick, 4),
                 'upper_wick_ratio': round(upper_wick_ratio, 4),
                 'lower_wick_ratio': round(lower_wick_ratio, 4),
-                
-                # 🔧 IMPROVED: เพิ่มข้อมูลที่แม่นยำขึ้น
                 'price_change': round(price_change, 4),
-                'price_change_pips': round(price_change * 100, 2),  # สำหรับทองคำ
-                'momentum_score': momentum_score,
-                'relative_strength': relative_strength,
-                
-                # Pattern recognition
+                'price_change_pips': round(price_change * 10000, 2),
                 'pattern_name': pattern_info['name'],
                 'pattern_strength': pattern_info['strength'],
                 'pattern_reliability': pattern_info['reliability'],
-                'reversal_pattern': pattern_info['is_reversal'],
-                'continuation_pattern': pattern_info['is_continuation'],
-                
-                # Quality metrics
                 'analysis_quality': self._calculate_candle_quality(body_ratio, candle_range, upper_wick_ratio, lower_wick_ratio),
                 'signal_clarity': self._calculate_signal_clarity(candle_color, price_direction, body_ratio)
             }
             
-            print(f"🕯️ Advanced analysis: {candle_color} candle, body {body_ratio:.3f}, momentum {momentum_score:.2f}")
-            
-            # บันทึก cache
-            self.cached_analysis = analysis_result.copy()
-            self.last_analysis_time = datetime.now()
+            print(f"📊 ANALYSIS RESULTS:")
+            print(f"   Color: {candle_color}")
+            print(f"   Body Ratio: {body_ratio:.3f} ({body_ratio*100:.1f}%)")
+            print(f"   Price Direction: {price_direction}")
+            print(f"   Price Change: {price_change:+.4f} ({price_change*10000:+.1f} pips)")
+            print(f"   Range: {candle_range:.4f}")
+            print(f"   Pattern: {pattern_info['name']}")
             
             return analysis_result
             
         except Exception as e:
             print(f"❌ Candlestick analysis error: {e}")
             return self._get_fallback_analysis()
-    
-    def _calculate_momentum(self, current: Dict, previous: Dict) -> float:
-        """
-        🚀 คำนวณ Momentum Score - NEW
         
-        Args:
-            current: แท่งปัจจุบัน
-            previous: แท่งก่อนหน้า
-            
-        Returns:
-            float: Momentum score (-1.0 ถึง 1.0)
-        """
-        try:
-            curr_close = current['close']
-            curr_open = current['open'] 
-            prev_close = previous['close']
-            prev_open = previous['open']
-            
-            # คำนวณ momentum จากการเปลี่ยนแปลงราคา
-            current_move = curr_close - curr_open
-            previous_move = prev_close - prev_open
-            price_acceleration = curr_close - prev_close
-            
-            # Normalize momentum 
-            curr_range = current['high'] - current['low']
-            prev_range = previous['high'] - previous['low']
-            avg_range = (curr_range + prev_range) / 2
-            
-            if avg_range > 0:
-                momentum = price_acceleration / avg_range
-                # จำกัดในช่วง -1.0 ถึง 1.0
-                momentum = max(-1.0, min(1.0, momentum))
-            else:
-                momentum = 0.0
-            
-            return round(momentum, 3)
-            
-        except Exception as e:
-            return 0.0
-
-    def _calculate_relative_strength(self, current: Dict, previous: Dict) -> float:
-        """
-        💪 คำนวณ Relative Strength - NEW
-        
-        Args:
-            current: แท่งปัจจุบัน
-            previous: แท่งก่อนหน้า
-            
-        Returns:
-            float: Relative strength (0.0 ถึง 1.0)
-        """
-        try:
-            curr_range = current['high'] - current['low']
-            prev_range = previous['high'] - previous['low']
-            
-            curr_body = abs(current['close'] - current['open'])
-            prev_body = abs(previous['close'] - previous['open'])
-            
-            # เปรียบเทียบขนาด range และ body
-            range_ratio = curr_range / prev_range if prev_range > 0 else 1.0
-            body_ratio = curr_body / prev_body if prev_body > 0 else 1.0
-            
-            # คำนวณ relative strength
-            relative_strength = (range_ratio + body_ratio) / 2
-            
-            # Normalize ให้อยู่ในช่วง 0-1
-            relative_strength = min(relative_strength / 2, 1.0)  # หารด้วย 2 เพื่อ normalize
-            
-            return round(relative_strength, 3)
-            
-        except Exception as e:
-            return 0.5
 
     def _recognize_advanced_patterns(self, candle_data: Dict) -> Dict:
         """

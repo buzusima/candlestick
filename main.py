@@ -34,6 +34,7 @@ from order_executor import OrderExecutor
 from position_monitor import PositionMonitor
 from performance_tracker import PerformanceTracker
 from risk_manager import RiskManager
+from data_persistence import create_persistence_manager, integrate_with_analyzer, integrate_with_generator
 
 class PureCandlestickGUI:
     """

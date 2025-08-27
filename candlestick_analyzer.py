@@ -72,36 +72,48 @@ class CandlestickAnalyzer:
     
     def _get_latest_closed_candle(self) -> Optional[Dict]:
         """
-        📊 Breakout Trading Logic - ดึง rates[1] แล้วรอ rates[0] ปิด
+        📊 Real Candle Comparison - ใช้แท่งจริงจาก MT5
         
-        Logic:
-        1. ดึง rates[1] เป็น Reference Candle (แท่งอ้างอิง)
-        2. รอ rates[0] ปิด
-        3. เช็ค breakout: Close > High = BUY, Close < Low = SELL
+        🔧 BACK TO BASICS:
+        - ใช้แท่งจริงจาก Chart
+        - rates[0] = แท่งที่ปิดล่าสุด
+        - rates[1] = แท่งก่อนหน้า
+        - เปรียบเทียบ: rates[0].close vs rates[1].close
+        - ไม่สร้างแท่งปลอม ใช้ของจริงเท่านั้น
         """
         try:
-            # ดึงข้อมูล 3 แท่งล่าสุด
-            rates = mt5.copy_rates_from_pos(self.symbol, self.timeframe, 0, 3)
+            print(f"🔍 Getting REAL candles for symbol: {self.symbol}")
             
-            if rates is None or len(rates) < 2:
-                print("Cannot get sufficient candle data")
+            # 1. ตรวจสอบการเชื่อมต่อ MT5
+            if not self.mt5_connector or not self.mt5_connector.is_connected:
+                print("❌ MT5 not connected")
                 return None
             
-            # ดึงข้อมูล rates[1] เป็น Reference Candle
-            reference_raw = rates[1]
-            current_raw = rates[0]  # แท่งที่อาจกำลังสร้างหรือเพิ่งปิด
+            # 2. ดึงแท่งเทียน 3 แท่งล่าสุดจาก MT5 (ต้องการ rates[1] และ rates[2])
+            rates = mt5.copy_rates_from_pos(self.symbol, self.timeframe, 0, 3)
+            if rates is None or len(rates) < 3:
+                print(f"❌ Cannot get 3 candles for symbol: {self.symbol}")
+                # ลอง symbol อื่น
+                alternative_symbols = ["XAUUSD", "GOLD", "XAUUSD.cmd"]
+                for alt_symbol in alternative_symbols:
+                    print(f"🔄 Trying alternative symbol: {alt_symbol}")
+                    rates = mt5.copy_rates_from_pos(alt_symbol, self.timeframe, 0, 3)
+                    if rates is not None and len(rates) >= 3:
+                        print(f"✅ Found candle data with symbol: {alt_symbol}")
+                        self.symbol = alt_symbol  # อัพเดท symbol
+                        break
+                
+                if rates is None or len(rates) < 3:
+                    print("❌ No real candle data available")
+                    return None
             
-            # แปลงข้อมูล reference candle
-            reference_candle = {
-                'time': datetime.fromtimestamp(int(reference_raw['time'])),
-                'open': float(reference_raw['open']),
-                'high': float(reference_raw['high']),
-                'low': float(reference_raw['low']),
-                'close': float(reference_raw['close']),
-                'volume': int(reference_raw['tick_volume']) if 'tick_volume' in reference_raw.dtype.names else 0
-            }
+            print(f"✅ Got {len(rates)} real candles from MT5")
             
-            # แปลงข้อมูล current candle
+            # 3. แท่งจริงจาก MT5 - ใช้ rates[1] vs rates[2]
+            current_raw = rates[1]    # แท่งที่เพิ่งปิด (เสถียรแล้ว)
+            previous_raw = rates[2]   # แท่งก่อนหน้า (ปิดแล้ว)
+            
+            # 4. แปลงข้อมูลแท่งปัจจุบัน
             current_candle = {
                 'time': datetime.fromtimestamp(int(current_raw['time'])),
                 'open': float(current_raw['open']),
@@ -111,208 +123,301 @@ class CandlestickAnalyzer:
                 'volume': int(current_raw['tick_volume']) if 'tick_volume' in current_raw.dtype.names else 0
             }
             
-            print("BREAKOUT ANALYSIS:")
-            print(f"   Reference [rates[1]]: {reference_candle['time'].strftime('%H:%M:%S')}")
-            print(f"     OHLC: {reference_candle['open']:.2f}/{reference_candle['high']:.2f}/{reference_candle['low']:.2f}/{reference_candle['close']:.2f}")
-            print(f"   Current [rates[0]]: {current_candle['time'].strftime('%H:%M:%S')}")
-            print(f"     OHLC: {current_candle['open']:.2f}/{current_candle['high']:.2f}/{current_candle['low']:.2f}/{current_candle['close']:.2f}")
-            
-            # เช็คว่าแท่งปัจจุบันปิดแล้วหรือยัง (ดูจาก OHLC pattern)
-            current_range = current_candle['high'] - current_candle['low']
-            is_closed = current_range > 0.5  # ถ้ามี range มากกว่า 0.5 ถือว่าปิดแล้ว
-            
-            if not is_closed:
-                print("   Current candle not closed yet, waiting...")
-                return None
-            
-            # วิเคราะห์ Breakout
-            reference_high = reference_candle['high']
-            reference_low = reference_candle['low']
-            current_close = current_candle['close']
-            
-            print("BREAKOUT CHECK:")
-            print(f"   Reference High: {reference_high:.2f}")
-            print(f"   Reference Low: {reference_low:.2f}")
-            print(f"   Current Close: {current_close:.2f}")
-            
-            # เช็ค Breakout
-            is_bullish_breakout = current_close > reference_high
-            is_bearish_breakout = current_close < reference_low
-            
-            print(f"   Bullish Breakout: {is_bullish_breakout} (Close > High)")
-            print(f"   Bearish Breakout: {is_bearish_breakout} (Close < Low)")
-            
-            if not (is_bullish_breakout or is_bearish_breakout):
-                print("   No breakout detected")
-                return None
-            
-            # เพิ่มข้อมูล breakout
-            breakout_data = {
-                'is_bullish_breakout': is_bullish_breakout,
-                'is_bearish_breakout': is_bearish_breakout,
-                'reference_high': reference_high,
-                'reference_low': reference_low,
-                'breakout_distance': abs(current_close - (reference_high if is_bullish_breakout else reference_low))
+            # 5. แปลงข้อมูลแท่งก่อนหน้า
+            previous_candle = {
+                'time': datetime.fromtimestamp(int(previous_raw['time'])),
+                'open': float(previous_raw['open']),
+                'high': float(previous_raw['high']),
+                'low': float(previous_raw['low']),
+                'close': float(previous_raw['close']),
+                'volume': int(previous_raw['tick_volume']) if 'tick_volume' in previous_raw.dtype.names else 0
             }
             
-            print(f"BREAKOUT DETECTED:")
-            print(f"   Type: {'BULLISH' if is_bullish_breakout else 'BEARISH'}")
-            print(f"   Distance: {breakout_data['breakout_distance']:.2f}")
+            # 6. Debug ข้อมูลแท่งจริง - rates[1] vs rates[2]
+            print(f"📊 REAL CANDLE COMPARISON (rates[1] vs rates[2]):")
+            print(f"   Current Candle [rates[1] - {current_candle['time'].strftime('%H:%M')}]:")
+            print(f"     OHLC: {current_candle['open']:.2f}/{current_candle['high']:.2f}/{current_candle['low']:.2f}/{current_candle['close']:.2f}")
+            print(f"   Previous Candle [rates[2] - {previous_candle['time'].strftime('%H:%M')}]:")
+            print(f"     OHLC: {previous_candle['open']:.2f}/{previous_candle['high']:.2f}/{previous_candle['low']:.2f}/{previous_candle['close']:.2f}")
+            
+            # 7. คำนวณการเปลี่ยนแปลงราคา
+            price_diff = current_candle['close'] - previous_candle['close']
+            
+            print(f"   Price Difference: {price_diff:+.2f}")
+            
+            # 8. กำหนดทิศทางการเทรดจากแท่งจริง rates[1] vs rates[2]
+            min_price_change = 0.10  # ลดลงเป็น 10 cents สำหรับแท่งจริง
+            
+            if price_diff > min_price_change:
+                signal_direction = 'BUY_SIGNAL'
+                print(f"   → 🟢 BUY Signal: rates[1] Close > rates[2] Close (+{price_diff:.2f})")
+            elif price_diff < -min_price_change:
+                signal_direction = 'SELL_SIGNAL'
+                print(f"   → 🔴 SELL Signal: rates[1] Close < rates[2] Close ({price_diff:.2f})")
+            else:
+                signal_direction = 'NO_SIGNAL'
+                print(f"   → ⏳ No Signal: Change too small ({price_diff:+.2f})")
+            
+            # 9. คำนวณความแข็งแกร่งจากแท่งจริง
+            candle_range = current_candle['high'] - current_candle['low']
+            body_size = abs(current_candle['close'] - current_candle['open'])
+            body_ratio = body_size / candle_range if candle_range > 0 else 0
+            
+            # รวม price strength และ candle strength
+            price_strength = min(abs(price_diff) / 5.0, 1.0)  # normalize by 5.0
+            candle_strength = min(body_ratio * 2, 1.0)
+            overall_strength = (price_strength + candle_strength) / 2
+            
+            print(f"   💪 Candle Analysis:")
+            print(f"     Body Ratio: {body_ratio:.3f}")
+            print(f"     Price Strength: {price_strength:.3f}")
+            print(f"     Overall Strength: {overall_strength:.3f}")
             
             return {
                 'current': current_candle,
-                'reference': reference_candle,
-                'breakout': breakout_data
+                'previous': previous_candle,
+                'signal_direction': signal_direction,
+                'price_difference': price_diff,
+                'price_strength': price_strength,
+                'candle_strength': candle_strength,
+                'overall_strength': overall_strength,
+                'body_ratio': body_ratio,
+                'analysis_method': 'real_candle_rates_1_vs_2'
             }
             
         except Exception as e:
-            print(f"Breakout analysis error: {e}")
+            print(f"❌ Real candle comparison error: {e}")
             return None
-
+            
     def get_current_analysis(self) -> Optional[Dict]:
         """
-        📊 Breakout Analysis - วิเคราะห์การ breakout
+        📊 Real Candle Analysis - ใช้แท่งจริงจาก MT5
+        
+        🔧 BACK TO REAL CANDLES:
+        - BUY: Current Close > Previous Close
+        - SELL: Current Close < Previous Close
+        - ใช้แท่งจริงจาก Chart
+        - ไม่สร้างข้อมูลปลอม
         """
         try:
-            print("=== BREAKOUT TRADING ANALYSIS ===")
+            print("=== 📊 REAL CANDLE ANALYSIS ===")
             
             if not self.mt5_connector.is_connected:
-                print("MT5 not connected")
+                print("❌ MT5 not connected")
                 return None
             
-            # ดึงข้อมูล breakout
-            breakout_data = self._get_latest_closed_candle()
-            if not breakout_data:
+            # ดึงข้อมูลแท่งจริงจาก MT5
+            candle_data = self._get_latest_closed_candle()
+            if not candle_data:
+                print("❌ No real candle data available")
                 return None
             
-            current_candle = breakout_data['current']
-            reference_candle = breakout_data['reference']
-            breakout_info = breakout_data['breakout']
+            current_candle = candle_data['current']
+            previous_candle = candle_data['previous']
             
-            # สร้างลายเซ็น (ใช้ current candle)
+            # สร้าง OHLC signature จากแท่งจริง
             candle_signature = self._create_candle_signature(current_candle)
             
-            # เช็คว่าวิเคราะห์แล้วหรือยัง
+            # เช็คว่าวิเคราะห์แท่งนี้แล้วหรือยัง
             if self._is_signature_processed(candle_signature):
-                print("Breakout already analyzed")
+                print("🔄 Real candle already analyzed - skipping")
                 return None
             
-            print("NEW BREAKOUT ANALYSIS:")
-            print(f"   Signature: {candle_signature}")
-            print(f"   Type: {'BUY Signal' if breakout_info['is_bullish_breakout'] else 'SELL Signal'}")
+            print(f"🆕 NEW REAL CANDLE ANALYSIS (rates[1] vs rates[2]):")
+            print(f"   OHLC Signature: {candle_signature}")
+            print(f"   Method: Real Candle rates[1] vs rates[2] Comparison")
             
-            # คำนวณ body ratio ของแท่งปัจจุบัน
-            current_body_size = abs(current_candle['close'] - current_candle['open'])
-            current_range = current_candle['high'] - current_candle['low']
-            body_ratio = current_body_size / current_range if current_range > 0 else 0
+            # ดึงข้อมูลจากแท่งจริง
+            current_close = current_candle['close']
+            previous_close = previous_candle['close']
+            price_diff = candle_data['price_difference']
+            overall_strength = candle_data['overall_strength']
+            body_ratio = candle_data['body_ratio']
             
-            # รวมข้อมูลทั้งหมด
+            # กำหนดสีแท่งเทียนจากข้อมูลจริง
+            if current_candle['close'] > current_candle['open']:
+                candle_color = 'green'
+                candle_type = 'bullish'
+            elif current_candle['close'] < current_candle['open']:
+                candle_color = 'red'
+                candle_type = 'bearish'
+            else:
+                candle_color = 'doji'
+                candle_type = 'neutral'
+            
+            # กำหนดทิศทางราคา
+            if current_close > previous_close:
+                price_direction = 'higher_close'
+                signal_type = 'bullish'
+            elif current_close < previous_close:
+                price_direction = 'lower_close'
+                signal_type = 'bearish'
+            else:
+                price_direction = 'same_close'
+                signal_type = 'neutral'
+            
+            print(f"📊 REAL CANDLE RESULTS:")
+            print(f"   Current Close: ${current_close:.2f}")
+            print(f"   Previous Close: ${previous_close:.2f}")
+            print(f"   Price Change: {price_diff:+.2f}")
+            print(f"   Candle Color: {candle_color}")
+            print(f"   Signal Type: {signal_type}")
+            print(f"   Body Ratio: {body_ratio:.3f}")
+            print(f"   Overall Strength: {overall_strength:.3f}")
+            
+            # รวมข้อมูลทั้งหมดจากแท่งจริง
             complete_analysis = {
                 'symbol': self.symbol,
                 'timestamp': datetime.now(),
                 'candle_time': current_candle['time'],
                 'candle_signature': candle_signature,
                 
-                # Current candle data
+                # Current candle data (จริง)
                 'open': current_candle['open'],
                 'high': current_candle['high'],
                 'low': current_candle['low'],
                 'close': current_candle['close'],
                 
-                # Reference candle data
-                'reference_open': reference_candle['open'],
-                'reference_high': reference_candle['high'],
-                'reference_low': reference_candle['low'],
-                'reference_close': reference_candle['close'],
+                # Previous candle data (จริง)
+                'previous_open': previous_candle['open'],
+                'previous_high': previous_candle['high'],
+                'previous_low': previous_candle['low'],
+                'previous_close': previous_candle['close'],
                 
-                # Breakout analysis
-                'is_bullish_breakout': breakout_info['is_bullish_breakout'],
-                'is_bearish_breakout': breakout_info['is_bearish_breakout'],
-                'breakout_distance': breakout_info['breakout_distance'],
-                
-                # Technical analysis
+                # Analysis results จากแท่งจริง
+                'price_difference': price_diff,
                 'body_ratio': body_ratio,
-                'candle_color': 'green' if current_candle['close'] > current_candle['open'] else 'red',
-                'price_direction': 'breakout_up' if breakout_info['is_bullish_breakout'] else 'breakout_down',
-                'pattern_name': 'bullish_breakout' if breakout_info['is_bullish_breakout'] else 'bearish_breakout',
-                'pattern_strength': min(breakout_info['breakout_distance'] / 5.0, 1.0),  # normalize
+                'candle_color': candle_color,
+                'candle_type': candle_type,
+                'price_direction': price_direction,
+                'signal_type': signal_type,
+                'analysis_strength': overall_strength,
                 
-                # Tracking info
-                'tracking_method': 'breakout_analysis',
-                'is_breakout_signal': True,
+                # Pattern info
+                'pattern_name': f'real_{signal_type}',
+                'pattern_strength': overall_strength,
                 
-                # Volume (if available)
-                'volume_available': False,
-                'current_volume': current_candle.get('volume', 0),
-                'avg_volume': 0,
-                'volume_factor': 1.0,
+                # Technical indicators
+                'is_bullish': signal_type == 'bullish',
+                'is_bearish': signal_type == 'bearish',
+                'is_strong_signal': overall_strength >= 0.3,
                 
-                # Market context
-                'market_context': f"breakout_{datetime.now().hour}",
-                'analysis_strength': min(breakout_info['breakout_distance'] / 3.0, 1.0)
+                # Volume จากแท่งจริง
+                'volume_available': True,
+                'current_volume': current_candle['volume'],
+                'previous_volume': previous_candle['volume'],
+                'volume_factor': current_candle['volume'] / max(previous_candle['volume'], 1),
+                
+                # Metadata
+                'tracking_method': 'real_candle_rates_1_vs_2',
+                'market_context': f"real_session_{datetime.now().hour}",
+                'analysis_method': 'mt5_rates_1_vs_2',
+                'candle_range': current_candle['high'] - current_candle['low'],
+                'body_size': abs(current_candle['close'] - current_candle['open']),
+                'price_strength': candle_data['price_strength'],
+                'candle_strength': candle_data['candle_strength']
             }
             
-            # บันทึกว่าวิเคราะห์แล้ว
+            # บันทึกว่าวิเคราะห์แท่งจริงนี้แล้ว
             self._mark_signature_processed(candle_signature)
             
-            print("BREAKOUT ANALYSIS COMPLETED:")
-            print(f"   Signal Type: {complete_analysis['pattern_name']}")
-            print(f"   Strength: {complete_analysis['analysis_strength']:.2f}")
-            print(f"   Body Ratio: {body_ratio:.3f}")
+            print(f"✅ REAL CANDLE ANALYSIS COMPLETED")
+            print(f"   Signal: {signal_type.upper()}")
+            print(f"   Strength: {overall_strength:.3f}")
+            print(f"   Real OHLC: {candle_signature}")
             
             return complete_analysis
             
         except Exception as e:
-            print(f"Breakout analysis error: {e}")
+            print(f"❌ Real candle analysis error: {e}")
             return None
-                
+                        
     def _create_candle_signature(self, candle: Dict) -> str:
         """
-        🔑 สร้างลายเซ็นของแท่งเทียน - UPDATED VERSION
+        🔑 สร้างลายเซ็น OHLC - PURE OHLC NO TIME VERSION
         
-        🔧 UPDATED: ใช้ OHLC ครบสำหรับแท่งที่ปิดแล้ว
+        🔧 FINAL VERSION: ไม่ใช้เวลาเลย ใช้แค่ OHLC
+        - ไม่มี timestamp
+        - ไม่มี datetime
+        - แค่ราคา 4 ตัวเท่านั้น
         """
         try:
-            t = int(candle['time'].timestamp())
-            o = round(candle['open'], 2)
-            h = round(candle['high'], 2)
-            l = round(candle['low'], 2)
-            c = round(candle['close'], 2)
+            # ดึงข้อมูล OHLC และปัดเศษ 2 ตำแหน่ง
+            o = round(float(candle['open']), 2)
+            h = round(float(candle['high']), 2)
+            l = round(float(candle['low']), 2)
+            c = round(float(candle['close']), 2)
             
-            # สร้างลายเซ็นจาก OHLC + timestamp
-            signature = f"{t}_{o}_{h}_{l}_{c}"
+            # สร้างลายเซ็นจาก OHLC เท่านั้น - ไม่มีเวลา
+            signature = f"{o}_{h}_{l}_{c}"
             
-            print(f"🔑 Candle signature: {signature}")
+            print(f"🔑 PURE OHLC Signature: {signature}")
+            
             return signature
             
         except Exception as e:
-            print(f"❌ Create signature error: {e}")
-            return f"error_{datetime.now().timestamp()}"
-    
+            print(f"❌ OHLC signature error: {e}")
+            # Fallback signature แบบไม่ใช้เวลา
+            return f"error_{hash(str(candle))}"
+
     def _is_signature_processed(self, signature: str) -> bool:
-        """🔍 เช็คว่าลายเซ็นนี้ประมวลผลแล้วหรือยัง"""
-        return signature in self.processed_signatures
+        """
+        🔍 เช็คว่าลายเซ็น OHLC นี้ประมวลผลแล้วหรือยัง
+        
+        Args:
+            signature: ลายเซ็น OHLC
+            
+        Returns:
+            bool: True ถ้าประมวลผลแล้ว
+        """
+        is_processed = signature in self.processed_signatures
+        
+        if is_processed:
+            print(f"✅ OHLC Signature already processed: {signature}")
+        else:
+            print(f"🆕 New OHLC Signature: {signature}")
+        
+        return is_processed
 
     def _mark_signature_processed(self, signature: str):
-        """✅ บันทึกลายเซ็นว่าประมวลผลแล้ว"""
+        """
+        ✅ บันทึกลายเซ็น OHLC ว่าประมวลผลแล้ว - NO TIME VERSION
+        """
         try:
             self.processed_signatures.add(signature)
             
-            # เก็บแค่ N ลายเซ็นล่าสุด
-            if len(self.processed_signatures) > self.max_signature_history:
-                # ลบลายเซ็นเก่าที่สุด (เรียงตาม timestamp ใน signature)
-                sorted_signatures = sorted(self.processed_signatures, 
-                                         key=lambda x: int(x.split('_')[0]))
-                oldest_signature = sorted_signatures[0]
+            # เก็บแค่ 20 ลายเซ็นล่าสุด (ลดลงเพราะไม่มี timestamp)
+            if len(self.processed_signatures) > 20:
+                # ลบแบบ FIFO - เอาตัวแรกออก
+                oldest_signature = next(iter(self.processed_signatures))
                 self.processed_signatures.remove(oldest_signature)
-                
-            self.last_candle_signature = signature
+                print(f"🗑️ Removed oldest OHLC: {oldest_signature}")
             
-            print(f"✅ Signature marked as processed")
+            print(f"✅ OHLC Signature processed: {signature}")
             print(f"   Total processed: {len(self.processed_signatures)}")
             
         except Exception as e:
             print(f"❌ Mark signature error: {e}")
+
+    def _extract_timestamp_from_signature(self, signature: str) -> float:
+        """
+        🔧 DEPRECATED: ไม่ใช้ timestamp ใน signature แล้ว
+        
+        🚫 Method นี้ไม่ถูกใช้แล้วเพราะเปลี่ยนเป็น OHLC-only signature
+        เก็บไว้เพื่อ backward compatibility เท่านั้น
+        
+        Args:
+            signature: ลายเซ็น OHLC
+            
+        Returns:
+            float: timestamp ปัจจุบัน (fallback)
+        """
+        print(f"⚠️ WARNING: _extract_timestamp_from_signature is deprecated")
+        print(f"   OHLC signatures don't contain timestamps anymore")
+        print(f"   Returning current timestamp as fallback")
+        
+        # Return current time as fallback
+        return datetime.now().timestamp()
             
 
     def _analyze_candlestick(self, current: Dict, previous: Dict) -> Dict:

@@ -36,6 +36,7 @@ from performance_tracker import PerformanceTracker
 from risk_manager import RiskManager
 from data_persistence import create_persistence_manager, integrate_with_analyzer, integrate_with_generator
 from position_monitor import PositionMonitor
+from order_role_manager import SmartOrderRoleManager
 
 class EnhancedPureCandlestickGUI:
     """
@@ -574,7 +575,8 @@ class EnhancedPureCandlestickGUI:
             self.order_executor = OrderExecutor(self.mt5_connector, self.config)
             
             # 🆕 Use Enhanced Position Monitor
-            self.position_monitor = PositionMonitor(self.mt5_connector, self.config)            
+            self.position_monitor = PositionMonitor(self.mt5_connector, self.config)
+            self.role_manager = SmartOrderRoleManager(self.mt5_connector, self.config)
             self.performance_tracker = PerformanceTracker(self.config)
             self.risk_manager = RiskManager(self.mt5_connector, self.config)
             
@@ -652,8 +654,8 @@ class EnhancedPureCandlestickGUI:
             self.is_trading = False
     
     def enhanced_trading_loop(self):
-        """🔄 Enhanced Trading Loop - เพิ่ม lot-aware analysis"""
-        self.log("🔄 Enhanced trading loop started")
+        """🔄 Enhanced Trading Loop - Smart Role Management Only"""
+        self.log("🔄 Enhanced trading loop with Smart Role Management started")
         
         while self.is_trading:
             try:
@@ -687,39 +689,129 @@ class EnhancedPureCandlestickGUI:
                                     if self.performance_tracker:
                                         self.performance_tracker.record_execution(execution_result, signal_data)
                 
-                # 🆕 4. Enhanced Position Monitoring
+                # 🆕 4. Smart Position Management (หลักเดียว)
                 if self.position_monitor:
                     positions = self.position_monitor.get_all_positions()
                     self.update_enhanced_positions_display(positions)
                     
-                    # 🆕 Enhanced Close Analysis
-                    close_actions = self.position_monitor.check_smart_close_opportunities()
-                    if close_actions:
-                        self.log(f"🧠 Found {len(close_actions)} enhanced close opportunities")
-                        self.update_recommendations_display_from_data(close_actions)
+                    # 🧠 Smart Role Management (ระบบหลัก)
+                    if self.role_manager and positions:
+                        role_analysis = self.role_manager.analyze_and_assign_roles(positions)
+                        recommendations = role_analysis.get('recommendations', [])
                         
-                        # ดำเนินการ close ตาม priority
-                        for action in close_actions[:2]:  # ทำแค่ 2 actions ต่อ cycle
-                            if self.position_monitor.execute_close_action(action):
-                                self.log(f"✅ Enhanced close executed: {action.get('action_type')}")
+                        if recommendations:
+                            self.log(f"🧠 Smart Role Analysis: {len(recommendations)} recommendations found")
+                            self.update_recommendations_display_from_data(recommendations)
+                            
+                            # Execute top smart recommendations
+                            for rec in recommendations[:2]:  # ทำแค่ 2 actions ต่อ cycle
+                                # จำลองผลกระทบสำหรับ actions ที่เสี่ยง
+                                if rec.get('action_type') in ['hedge_pair_close', 'strategic_sacrifice', 'emergency_portfolio_protection']:
+                                    positions_to_close = self._extract_positions_from_recommendation(rec)
+                                    if positions_to_close:
+                                        impact = self.role_manager.simulate_close_impact(positions_to_close, positions)
+                                        
+                                        # เช็คว่าควรทำไหม
+                                        recommendation_level = impact.get('overall_impact', {}).get('recommendation', 'NOT_RECOMMENDED')
+                                        if recommendation_level in ['HIGHLY_RECOMMENDED', 'RECOMMENDED']:
+                                            result = self.role_manager.execute_smart_recommendation(rec)
+                                            if result.get('success'):
+                                                action_type = rec.get('action_type', 'unknown')
+                                                self.log(f"✅ Smart action executed: {action_type}")
+                                                
+                                                # แสดงผลกระทบที่เกิดขึ้น
+                                                profit = impact.get('profit_from_closing', 0)
+                                                health_improvement = impact.get('projected_health_score', 0) - impact.get('current_health_score', 0)
+                                                self.log(f"   📊 Impact: ${profit:.2f} profit, +{health_improvement:.3f} health score")
+                                        else:
+                                            self.log(f"⚠️ Smart action skipped: {rec.get('action_type')} - {recommendation_level}")
+                                    else:
+                                        self.log(f"⚠️ No positions to close for {rec.get('action_type')}")
+                                
+                                else:
+                                    # สำหรับ actions ที่ไม่เสี่ยง (เช่น profit harvest)
+                                    result = self.role_manager.execute_smart_recommendation(rec)
+                                    if result.get('success'):
+                                        action_type = rec.get('action_type', 'unknown')
+                                        profit = rec.get('profit', 0)
+                                        self.log(f"✅ Smart action executed: {action_type} (${profit:.2f})")
+                        
+                        else:
+                            # ไม่มี smart recommendations - แสดงสถานะเบื้องต้น
+                            if len(positions) > 0:
+                                total_pnl = sum(p.get('total_pnl', 0) for p in positions)
+                                self.log(f"📊 Portfolio: {len(positions)} positions, ${total_pnl:.2f} P&L - No actions needed")
                 
                 # 🆕 5. Enhanced Performance Update
                 if self.performance_tracker:
                     performance = self.performance_tracker.get_current_metrics()
                     
-                    # เพิ่ม lot efficiency data
+                    # เพิ่ม lot efficiency + portfolio health data
                     if self.position_monitor:
                         lot_efficiency = self.position_monitor.get_lot_efficiency_report()
                         performance['lot_efficiency'] = lot_efficiency
                     
+                    if self.role_manager and positions:
+                        portfolio_health = self.role_manager.get_smart_portfolio_health(positions)
+                        performance['portfolio_health'] = portfolio_health
+                        
+                        # แสดงสุขภาพพอร์ตใน log (ทุก 10 cycles)
+                        if not hasattr(self, '_health_log_counter'):
+                            self._health_log_counter = 0
+                        
+                        self._health_log_counter += 1
+                        if self._health_log_counter % 10 == 0:
+                            health_score = portfolio_health.get('health_score', 0)
+                            status = portfolio_health.get('status', 'unknown')
+                            total_pnl = portfolio_health.get('total_pnl', 0)
+                            margin_health = portfolio_health.get('margin_health', {})
+                            margin_level = margin_health.get('margin_level', 0)
+                            
+                            if margin_level == float('inf'):
+                                margin_display = "∞%"
+                            else:
+                                margin_display = f"{margin_level:.1f}%"
+                            
+                            self.log(f"🏥 Portfolio Health: {health_score:.3f} ({status}) | P&L: ${total_pnl:.2f} | Margin: {margin_display}")
+                    
                     self.update_enhanced_performance_display(performance)
                 
-                # 6. Risk Management (เดิม)
+                # 6. Enhanced Risk Management
                 if self.risk_manager:
                     risk_status = self.risk_manager.check_risk_levels()
                     if risk_status.get('emergency_stop', False):
                         self.log("🚨 EMERGENCY STOP triggered by risk manager!")
-                        self.emergency_close_all()
+                        
+                        # ใช้ smart role manager สำหรับ emergency close
+                        if self.role_manager and positions:
+                            # หาออเดอร์กำไรที่ใหญ่ที่สุด
+                            profitable_positions = [p for p in positions if p.get('total_pnl', 0) > 20]
+                            
+                            if profitable_positions:
+                                # เรียงตามกำไร (มากไปน้อย)
+                                profitable_positions.sort(key=lambda x: x.get('total_pnl', 0), reverse=True)
+                                top_profitable = profitable_positions[:min(3, len(profitable_positions))]  # เลือก 3 อันดับแรก
+                                
+                                emergency_rec = {
+                                    'action_type': 'emergency_portfolio_protection',
+                                    'positions_to_close': [p['id'] for p in top_profitable],
+                                    'emergency_profit': sum(p.get('total_pnl', 0) for p in top_profitable),
+                                    'priority': 1,
+                                    'reason': 'Risk Manager Emergency Stop - Harvest Top Profits'
+                                }
+                                
+                                result = self.role_manager.execute_smart_recommendation(emergency_rec)
+                                if result.get('success'):
+                                    emergency_profit = emergency_rec['emergency_profit']
+                                    self.log(f"✅ Smart emergency close completed: ${emergency_profit:.2f} profit secured")
+                                else:
+                                    self.log("❌ Smart emergency close failed - using fallback")
+                                    self.emergency_close_all()
+                            else:
+                                self.log("⚠️ No profitable positions for smart emergency close")
+                                self.emergency_close_all()
+                        else:
+                            self.emergency_close_all()
                         break
                 
                 time.sleep(3)  # ทุก 3 วินาที
@@ -728,8 +820,47 @@ class EnhancedPureCandlestickGUI:
                 self.log(f"❌ Enhanced trading loop error: {e}")
                 time.sleep(5)
         
-        self.log("🔄 Enhanced trading loop ended")
-    
+        self.log("🔄 Enhanced trading loop with Smart Role Management ended")
+
+    def _extract_positions_from_recommendation(self, recommendation: dict) -> list:
+        """🔍 ดึง position IDs จาก recommendation สำหรับ impact simulation"""
+        try:
+            action_type = recommendation.get('action_type')
+            positions_to_close = []
+            
+            if action_type == 'hedge_pair_close':
+                hg_id = recommendation.get('hg_position_id')
+                partner_id = recommendation.get('partner_position_id')
+                if hg_id:
+                    positions_to_close.append(hg_id)
+                if partner_id:
+                    positions_to_close.append(partner_id)
+                    
+            elif action_type == 'strategic_sacrifice':
+                sacrifice_id = recommendation.get('sacrifice_position_id')
+                profitable_id = recommendation.get('profitable_position_id')
+                if sacrifice_id:
+                    positions_to_close.append(sacrifice_id)
+                if profitable_id:
+                    positions_to_close.append(profitable_id)
+                    
+            elif action_type == 'emergency_portfolio_protection':
+                positions_to_close = recommendation.get('positions_to_close', [])
+                
+            elif action_type == 'main_profit_harvest':
+                position_id = recommendation.get('position_id')
+                if position_id:
+                    positions_to_close.append(position_id)
+                    
+            elif action_type == 'volume_balance':
+                positions_to_close = recommendation.get('positions_to_close', [])
+            
+            return positions_to_close
+            
+        except Exception as e:
+            self.log(f"❌ Extract positions error: {e}")
+            return []
+       
     # ==========================================
     # 📊 ENHANCED DISPLAY UPDATE METHODS
     # ==========================================

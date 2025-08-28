@@ -1,32 +1,33 @@
 {
-  "session_duration_hours": 0.2,
-  "signals_generated": 8,
-  "signals_per_hour": 40.08,
-  "orders_executed": 8,
+  "session_duration_hours": 4.38,
+  "signals_generated": 51,
+  "signals_per_hour": 11.65,
+  "orders_executed": 51,
   "execution_success_rate": 100.0,
   "current_profit": 0.0,
   "total_volume_traded": 0.0,
   "final_lot_efficiency": {
     "efficiency_breakdown": {
       "terrible": {
-        "count": 9,
-        "total_volume": 0.48,
-        "total_profit": -50.97,
-        "avg_efficiency": -92.1,
-        "volume_percentage": 48.0
+        "count": 4,
+        "total_volume": 0.29,
+        "total_profit": -113.3,
+        "avg_efficiency": -415.0,
+        "volume_percentage": 29.0
       }
     },
     "portfolio_stats": {
-      "total_buy_volume": 0.3,
-      "total_sell_volume": 0.18,
-      "avg_profit_per_lot_buy": -128.7,
-      "avg_profit_per_lot_sell": -68.6,
-      "volume_imbalance_ratio": 0.25,
-      "margin_efficiency_score": -31.463
+      "total_buy_volume": 0.08,
+      "total_sell_volume": 0.21,
+      "avg_profit_per_lot_buy": -278.0,
+      "avg_profit_per_lot_sell": -433.6,
+      "volume_imbalance_ratio": 0.448,
+      "margin_efficiency_score": -115.6122
     },
     "recommendations": [
-      "🚨 มี 9 positions efficiency แย่มาก - หา hedge partners"
+      "🚨 มี 4 positions efficiency แย่มาก - หา hedge partners",
+      "⚖️ Volume imbalance 44.8% - ควร rebalance"
     ]
   },
-  "last_updated": "2025-08-28T10:34:05.528175"
+  "last_updated": "2025-08-28T15:15:00.862331"
 }

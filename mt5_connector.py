@@ -487,6 +487,40 @@ class MT5Connector:
             print(f"❌ Get current price error for {symbol}: {e}")
             return 0.0
 
+    def get_current_spread(self, symbol: str = "XAUUSD.v") -> float:
+        """🔍 ดึง spread ปัจจุบันจาก MT5 (หน่วย points)"""
+        try:
+            tick = mt5.symbol_info_tick(symbol)
+            if tick:
+                spread_points = tick.ask - tick.bid
+                return round(spread_points, 2)
+            return 0.5  # fallback ถ้าดึงไม่ได้
+        except Exception as e:
+            print(f"❌ Get spread error: {e}")
+            return 0.5
+
+    def get_spread_info(self, symbol: str = "XAUUSD.v") -> Dict:
+        """📊 ดึงข้อมูล spread แบบละเอียด"""
+        try:
+            tick = mt5.symbol_info_tick(symbol)
+            symbol_info = mt5.symbol_info(symbol)
+            
+            if tick and symbol_info:
+                spread_points = tick.ask - tick.bid
+                spread_in_pips = spread_points / symbol_info.point
+                
+                return {
+                    'spread_points': round(spread_points, 2),
+                    'spread_pips': round(spread_in_pips, 1),
+                    'ask': tick.ask,
+                    'bid': tick.bid,
+                    'timestamp': datetime.now()
+                }
+            return {}
+        except Exception as e:
+            print(f"❌ Get spread info error: {e}")
+            return {}
+    
 # === Test Function ===
 
 def test_connector():

@@ -143,7 +143,35 @@ class OrderExecutor:
             print(f"❌ Signal execution error: {e}")
             self._record_failed_execution(signal_data, str(e))
             return None
-        
+    
+    def _calculate_dynamic_lot_size(self, signal_data: Dict) -> float:
+        """🧮 คำนวณ lot size ตาม signal strength - EASIER VERSION"""
+        try:
+            strength_score = signal_data.get('strength', 0.5)
+            
+            # ปรับ threshold ให้ง่ายขึ้น
+            if strength_score >= 0.7:      # ลดจาก 0.8
+                lot_multiplier = 8.0
+            elif strength_score >= 0.55:  # ลดจาก 0.65
+                lot_multiplier = 5.0  
+            elif strength_score >= 0.4:   # ลดจาก 0.5
+                lot_multiplier = 3.0
+            elif strength_score >= 0.25:  # ลดจาก 0.35
+                lot_multiplier = 2.0
+            else:                          # <0.25
+                lot_multiplier = 1.0
+            
+            calculated_lot = self.base_lot * lot_multiplier
+            final_lot = max(self.min_lot, min(calculated_lot, self.max_lot))
+            
+            print(f"🧮 Dynamic lot: strength {strength_score:.2f} → {final_lot:.2f} lots (x{lot_multiplier})")
+            
+            return final_lot
+            
+        except Exception as e:
+            print(f"❌ Dynamic lot calculation error: {e}")
+            return self.base_lot
+       
     def _send_market_order(self, order_type: str, lot_size: float, signal_data: Dict) -> Optional[Dict]:
         """
         📤 ส่ง Market Order ผ่าน MT5 (COMPLETE FIXED)
@@ -424,8 +452,9 @@ class OrderExecutor:
             signal_strength = signal_data.get('strength', 0.6)
             lot_multiplier = signal_data.get('recommended_lot_multiplier', 1.0)
             
-            # คำนวณ lot แบบง่าย
-            final_lot = self.base_lot * signal_strength * lot_multiplier
+            # คำนวณ lot แบบ dynamic ตาม strength
+            dynamic_lot = self._calculate_dynamic_lot_size(signal_data)
+            final_lot = dynamic_lot * lot_multiplier            
             
             # ปรับตาม balance
             final_lot = self._apply_balance_scaling(final_lot, balance)

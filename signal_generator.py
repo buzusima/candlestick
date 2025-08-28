@@ -291,46 +291,179 @@ class SignalGenerator:
     
     def _calculate_trend_strength(self, candles: List[Dict], direction: str) -> float:
         """
-        📊 คำนวณความแข็งแกร่งของ trend
+        📊 คำนวณความแข็งแกร่งของ trend - ENHANCED FOR M1 (BALANCED VERSION)
+        
+        🆕 5 Factors Analysis - ปรับให้ไม่ยากเกินไป:
+        1. Pattern Consistency (30%) - แท่งต่อเนื่องสีเดียวกัน
+        2. Body Strength (25%) - ความใหญ่และสม่ำเสมอของ body
+        3. Momentum & Acceleration (20%) - ความเร็วและการเร่งของราคา
+        4. Volume Confirmation (15%) - volume สนับสนุนทิศทาง
+        5. Wick Analysis (10%) - การวิเคราะห์หางเทียน
         """
         try:
             if len(candles) < 3:
                 return 0.5
             
-            strength = 0.5  # Base strength
+            strength = 0.35  # เพิ่ม Base strength เป็น 35% (ง่ายขึ้น)
             
-            # 1. Body Ratio Factor (แท่งใหญ่ = แรง)
-            current_candle = candles[-1]
-            body_ratio = current_candle['body_ratio']
-            body_factor = min(body_ratio * 2, 0.3)  # สูงสุด +0.3
-            strength += body_factor
+            # =============================================
+            # 1. PATTERN CONSISTENCY ANALYSIS (30% weight)
+            # =============================================
+            colors = [candle['candle_color'] for candle in candles]
+            target_color = 'green' if direction == 'bullish' else 'red'
+            same_color_count = colors.count(target_color)
             
-            # 2. Price Movement Factor
-            price_changes = []
+            if same_color_count == 3:      # Perfect pattern (3/3)
+                pattern_score = 0.30
+            elif same_color_count == 2:   # Good pattern (2/3)
+                pattern_score = 0.20
+                # Bonus ถ้า 2 แท่งสุดท้ายเป็นสีเดียวกัน
+                if candles[-2]['candle_color'] == candles[-1]['candle_color'] == target_color:
+                    pattern_score += 0.05  # +5% bonus
+            else:                         # Weak pattern (1/3)
+                pattern_score = 0.05
+            
+            strength += pattern_score
+            
+            # 🎁 Basic Pattern Bonus (ง่ายขึ้น)
+            if same_color_count >= 2 and candles[-1]['body_ratio'] >= 0.05:
+                basic_bonus = 0.12  # Basic pattern bonus
+                strength += basic_bonus
+            
+            # =============================================
+            # 2. BODY STRENGTH ANALYSIS (25% weight) 
+            # =============================================
+            body_ratios = [candle['body_ratio'] for candle in candles]
+            
+            # Average body strength
+            avg_body_ratio = sum(body_ratios) / len(body_ratios)
+            body_strength = min(avg_body_ratio * 2.0, 0.15)  # ลดจาก 2.5 → 2.0 (ง่ายขึ้น)
+            
+            # Body consistency bonus (แท่งมี body สม่ำเสมอ)
+            body_std = (sum([(br - avg_body_ratio)**2 for br in body_ratios]) / len(body_ratios))**0.5
+            consistency_bonus = max(0.08 - body_std * 1.5, 0)  # ลด penalty (ง่ายขึ้น)
+            
+            # Current candle body strength
+            current_body = candles[-1]['body_ratio']
+            current_body_bonus = min(current_body * 1.5, 0.08) if current_body > 0.08 else 0  # ลดเกณฑ์
+            
+            total_body_score = body_strength + consistency_bonus + current_body_bonus
+            strength += min(total_body_score, 0.25)  # จำกัด 25%
+            
+            # =============================================
+            # 3. MOMENTUM & ACCELERATION (20% weight)
+            # =============================================
+            
+            # Price momentum (ระยะทาง 3 แท่ง)
+            price_momentum = abs(candles[-1]['close'] - candles[0]['close'])
+            momentum_score = min(price_momentum / 1.5, 0.12)  # ลดเกณฑ์ (ง่ายขึ้น)
+            
+            # Price acceleration (เร่งความเร็วใน M1)
+            step1_change = abs(candles[1]['close'] - candles[0]['close'])
+            step2_change = abs(candles[2]['close'] - candles[1]['close'])
+            
+            if step2_change > step1_change * 1.15:  # ลดจาก 1.2 → 1.15 (ง่ายขึ้น)
+                acceleration_bonus = 0.06
+            elif step2_change > step1_change:      # เร่งเล็กน้อย
+                acceleration_bonus = 0.03
+            else:                                  # ไม่เร่ง
+                acceleration_bonus = 0.0
+            
+            # Gap analysis (ลดเกณฑ์)
+            gap_factor = 0.0
             for i in range(1, len(candles)):
-                change = abs(candles[i]['close'] - candles[i-1]['close'])
-                price_changes.append(change)
+                prev_close = candles[i-1]['close']
+                curr_open = candles[i]['open']
+                gap = abs(curr_open - prev_close)
+                
+                if gap > 0.15:  # ลดจาก 0.2 → 0.15 (ง่ายขึ้น)
+                    gap_factor += 0.01
             
-            avg_movement = sum(price_changes) / len(price_changes) if price_changes else 0
-            movement_factor = min(avg_movement / 1.0, 0.2)  # สูงสุด +0.2
-            strength += movement_factor
+            momentum_total = momentum_score + acceleration_bonus + min(gap_factor, 0.02)
+            strength += min(momentum_total, 0.20)
             
-            # 3. Consistency Factor (แท่งสีเดียวกัน = แรง)
-            if direction == 'bullish':
-                target_color = 'green'
+            # =============================================
+            # 4. VOLUME CONFIRMATION (15% weight) - ปรับง่ายขึ้น
+            # =============================================
+            current_candle = candles[-1]
+            volume_score = 0.0
+            
+            if 'volume' in current_candle and current_candle['volume'] > 0:
+                prev_volumes = [c.get('volume', 1) for c in candles[:-1] if c.get('volume', 0) > 0]
+                
+                if prev_volumes:
+                    avg_prev_volume = sum(prev_volumes) / len(prev_volumes)
+                    current_volume = current_candle['volume']
+                    volume_ratio = current_volume / max(avg_prev_volume, 1)
+                    
+                    if volume_ratio >= 1.8:     # ลดจาก 2.0 → 1.8 (ง่ายขึ้น)
+                        volume_score = 0.15
+                    elif volume_ratio >= 1.3:  # ลดจาก 1.5 → 1.3
+                        volume_score = 0.10
+                    elif volume_ratio >= 1.1:  # ลดจาก 1.2 → 1.1
+                        volume_score = 0.05
+                    else:
+                        volume_score = 0.02  # ให้ bonus เล็กน้อยแทน 0
+                    
+                    # ลด penalty
+                    if volume_ratio < 0.6:  # ลดจาก 0.5 → 0.6
+                        volume_score = -0.02  # ลด penalty จาก -0.05 → -0.02
             else:
-                target_color = 'red'
+                volume_score = 0.03  # ให้ default bonus เมื่อไม่มี volume data
             
-            same_color_count = sum(1 for candle in candles if candle['candle_color'] == target_color)
-            consistency_factor = (same_color_count / len(candles)) * 0.2
-            strength += consistency_factor
+            strength += volume_score
             
-            return round(min(strength, 1.0), 3)
+            # =============================================
+            # 5. WICK ANALYSIS (10% weight) - ปรับง่ายขึ้น
+            # =============================================
+            current_candle = candles[-1]
+            total_range = current_candle['high'] - current_candle['low']
+            wick_score = 0.0
+            
+            if total_range > 0:
+                body_top = max(current_candle['open'], current_candle['close'])
+                body_bottom = min(current_candle['open'], current_candle['close'])
+                
+                upper_wick = current_candle['high'] - body_top
+                lower_wick = body_bottom - current_candle['low']
+                
+                upper_wick_ratio = upper_wick / total_range
+                lower_wick_ratio = lower_wick / total_range
+                
+                if direction == 'bullish':
+                    # BUY: หางล่างยาว + หางบนสั้น
+                    if lower_wick_ratio > 0.25 and lower_wick_ratio > upper_wick_ratio * 1.3:  # ลดเกณฑ์
+                        wick_score = 0.08  # ลดจาก 0.10
+                    elif lower_wick_ratio > 0.15:  # ลดจาก 0.2
+                        wick_score = 0.04  # ลดจาก 0.05
+                    elif upper_wick_ratio > 0.5:  # เพิ่มเกณฑ์ penalty (ยากขึ้นเล็กน้อย)
+                        wick_score = -0.02  # ลด penalty จาก -0.03
+                    else:
+                        wick_score = 0.02
+                else:  # bearish
+                    # SELL: หางบนยาว + หางล่างสั้น
+                    if upper_wick_ratio > 0.25 and upper_wick_ratio > lower_wick_ratio * 1.3:  # ลดเกณฑ์
+                        wick_score = 0.08
+                    elif upper_wick_ratio > 0.15:  # ลดเกณฑ์
+                        wick_score = 0.04
+                    elif lower_wick_ratio > 0.5:  # เพิ่มเกณฑ์ penalty
+                        wick_score = -0.02
+                    else:
+                        wick_score = 0.02
+            
+            strength += wick_score
+            
+            # =============================================
+            # 🎯 FINAL SCORE WITH EASIER LOT THRESHOLDS
+            # =============================================
+            final_strength = round(min(max(strength, 0.15), 1.0), 3)  # ขั้นต่ำ 0.15 (ง่ายขึ้น)
+            
+            return final_strength
             
         except Exception as e:
-            print(f"❌ Trend strength calculation error: {e}")
+            print(f"❌ Enhanced trend strength error: {e}")
             return 0.5
-    
+            
     # ==========================================
     # 🆕 NEW: PORTFOLIO BALANCE METHODS
     # ==========================================

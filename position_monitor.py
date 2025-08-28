@@ -789,53 +789,44 @@ class PositionMonitor:
             return []
     
     def _find_enhanced_profit_opportunities(self, positions: List[Dict]) -> List[Dict]:
-        """💰 หาโอกาสปิดเพื่อกำไร - ENHANCED WITH LOT EFFICIENCY"""
+        """💰 หาโอกาสปิดเพื่อกำไร - ENHANCED WITH DYNAMIC LOT EFFICIENCY"""
         try:
             profit_actions = []
             
-            # หา high-efficiency profitable positions
-            profitable_positions = [
-                p for p in positions 
-                if p.get('profit_per_lot', 0) >= self.min_efficiency_threshold * 0.8  # 80% ของ threshold
-                and p.get('total_pnl', 0) > self.min_net_profit_to_close
-            ]
-            
-            if not profitable_positions:
-                return profit_actions
-            
-            # เรียงตาม efficiency score
-            profitable_positions.sort(key=lambda x: x.get('profit_per_lot', 0), reverse=True)
-            
-            for pos in profitable_positions:
-                profit_per_lot = pos.get('profit_per_lot', 0)
-                total_profit = pos.get('total_pnl', 0)
-                age_hours = pos.get('age_hours', 0)
+            # วนตรวจสอบทุก position (ไม่ filter ก่อน)
+            for pos in positions:
                 volume = pos.get('volume', 0)
+                total_profit = pos.get('total_pnl', 0)
+                profit_per_lot = pos.get('profit_per_lot', 0)
+                age_hours = pos.get('age_hours', 0)
+                
+                # คำนวณ dynamic threshold สำหรับ position นี้
+                volume_threshold = self.calculate_volume_adjusted_threshold(volume)
                 
                 close_profit = False
-                priority = 5  # ปกติ
+                priority = 5
                 reason = ""
                 
-                # เกณฑ์การปิดแบบ lot-aware
-                if profit_per_lot >= self.min_efficiency_threshold * 2:  # efficiency สูงมาก
+                # เกณฑ์การปิดแบบ volume-adjusted
+                if total_profit >= volume_threshold * 2:  # efficiency สูงมาก
                     close_profit = True
                     priority = 1
-                    reason = f"Very high efficiency: ${profit_per_lot:.0f}/lot"
+                    reason = f"Very high efficiency: ${total_profit:.1f} vs ${volume_threshold * 2:.1f} target ({volume:.2f}L)"
                     
-                elif profit_per_lot >= self.min_efficiency_threshold and total_profit >= 50.0:
+                elif total_profit >= volume_threshold:  # efficiency ดี
                     close_profit = True  
                     priority = 2
-                    reason = f"High efficiency + good total: ${profit_per_lot:.0f}/lot, ${total_profit:.2f} total"
+                    reason = f"Good efficiency: ${total_profit:.1f} vs ${volume_threshold:.1f} target ({volume:.2f}L)"
                     
-                elif profit_per_lot >= self.min_efficiency_threshold * 0.8 and age_hours >= 12:
+                elif total_profit >= volume_threshold * 0.8 and age_hours >= 12:  # efficiency พอได้ + เก่า
                     close_profit = True
                     priority = 3
-                    reason = f"Good efficiency + old: ${profit_per_lot:.0f}/lot, {age_hours:.1f}h"
+                    reason = f"OK efficiency + old: ${total_profit:.1f} vs ${volume_threshold * 0.8:.1f} target ({age_hours:.1f}h)"
                 
-                elif total_profit >= 100.0 and volume >= 0.1:  # กำไรมากมาย + volume ใหญ่
+                elif total_profit >= volume_threshold * 0.6 and volume >= 0.1:  # volume ใหญ่ + กำไรพอสมควร
                     close_profit = True
-                    priority = 2  
-                    reason = f"Large profitable position: ${total_profit:.2f} ({volume:.2f} lots)"
+                    priority = 4  
+                    reason = f"Large volume + decent profit: ${total_profit:.1f} ({volume:.2f}L)"
                 
                 if close_profit:
                     profit_action = {
@@ -844,6 +835,7 @@ class PositionMonitor:
                         'profit_per_lot': profit_per_lot,
                         'total_profit': total_profit,
                         'volume': volume,
+                        'volume_threshold': volume_threshold,  # เพิ่มไว้ดู
                         'efficiency_category': pos.get('efficiency_category'),
                         'priority': priority,
                         'reason': reason
@@ -855,7 +847,19 @@ class PositionMonitor:
         except Exception as e:
             print(f"❌ Enhanced profit opportunities error: {e}")
             return []
-    
+        
+    # เพิ่ม method ใหม่ก่อน
+    def calculate_volume_adjusted_threshold(self, volume: float, position_type: str = 'profit') -> float:
+        """🧮 คำนวณ threshold แบบ volume-adjusted + real spread"""
+        try:
+            base_threshold = volume * 100.0
+            current_spread = self.mt5_connector.get_current_spread(self.symbol)
+            spread_buffer = current_spread * 2.0
+            final_threshold = base_threshold + spread_buffer
+            return max(final_threshold, 1.0)
+        except:
+            return volume * 100.0 + 2.0
+        
     # ==========================================
     # ⚡ ENHANCED EXECUTION METHODS  
     # ==========================================
@@ -1492,3 +1496,29 @@ class PositionMonitor:
             },
             'stats': self.close_stats.copy()
         }
+    
+    def calculate_volume_adjusted_threshold(self, volume: float, position_type: str = 'profit') -> float:
+        """
+        🧮 คำนวณ threshold แบบ volume-adjusted + real spread
+        Formula: (volume * 100) + (current_spread * buffer_multiplier)
+        """
+        try:
+            # Base: 0.01 lot ต่อ $1 → 1.0 lot ต่อ $100
+            base_threshold = volume * 100.0
+            
+            # ดึง spread จริงจาก MT5
+            current_spread = self.mt5_connector.get_current_spread(self.symbol)
+            
+            # Spread buffer = 2x current spread (เผื่อ spread เปลี่ยน)
+            spread_buffer = current_spread * 2.0
+            
+            # รวมกัน
+            final_threshold = base_threshold + spread_buffer
+            
+            print(f"💰 Volume-adjusted: {volume:.2f}L → ${base_threshold:.1f} + ${spread_buffer:.1f}sp = ${final_threshold:.1f}")
+            
+            return max(final_threshold, 1.0)  # อย่างต่ำ $1
+            
+        except Exception as e:
+            print(f"❌ Volume threshold calculation error: {e}")
+            return volume * 100.0 + 2.0  # fallback

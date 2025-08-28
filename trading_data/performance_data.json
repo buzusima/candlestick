@@ -1,62 +1,13 @@
 {
-  "session_duration_hours": 0.0404114175,
-  "total_signals": 2,
-  "total_orders": 2,
-  "total_profit": 0.0,
-  "winning_trades": 0,
-  "losing_trades": 0,
-  "break_even_trades": 0,
-  "win_rate": 0.0,
-  "avg_profit_per_trade": 0.0,
-  "profit_factor": 0.0,
-  "execution_rate": 1.0,
-  "signal_accuracy": 0,
-  "best_pattern": "standard",
-  "worst_pattern": "standard",
-  "pattern_count": 1,
-  "avg_execution_time_ms": 132.905,
-  "signals_per_hour": 49.490963785172845,
-  "symbol": "XAUUSD.v",
-  "last_update": "2025-08-28 00:03:01.153595",
+  "session_duration_hours": 0.05,
+  "signals_generated": 0,
+  "signals_per_hour": 0.0,
+  "orders_executed": 0,
+  "execution_success_rate": 0,
+  "current_profit": 0.0,
+  "total_volume_traded": 0.0,
   "final_lot_efficiency": {
-    "efficiency_breakdown": {
-      "excellent": {
-        "count": 1,
-        "total_volume": 0.01,
-        "total_profit": 0.56,
-        "avg_efficiency": 56.0,
-        "volume_percentage": 8.3
-      },
-      "good": {
-        "count": 1,
-        "total_volume": 0.01,
-        "total_profit": 0.06,
-        "avg_efficiency": 6.0,
-        "volume_percentage": 8.3
-      },
-      "terrible": {
-        "count": 10,
-        "total_volume": 0.1,
-        "total_profit": -12.19,
-        "avg_efficiency": -121.9,
-        "volume_percentage": 83.3
-      }
-    },
-    "portfolio_stats": {
-      "total_buy_volume": 0.05,
-      "total_sell_volume": 0.07,
-      "avg_profit_per_lot_buy": -52.6,
-      "avg_profit_per_lot_sell": -127.71,
-      "volume_imbalance_ratio": 0.167,
-      "margin_efficiency_score": -32.1389,
-      "total_positions": 12,
-      "total_volume": 0.12,
-      "weighted_portfolio_pnl": -11.57
-    },
-    "recommendations": [
-      "\ud83d\udea8 \u0e21\u0e35 10 positions efficiency \u0e41\u0e22\u0e48\u0e21\u0e32\u0e01 - \u0e2b\u0e32 hedge partners"
-    ]
+    "message": "No positions to analyze"
   },
-  "last_updated": "2025-08-28T00:03:01.177109",
-  "session_count": 1
+  "last_updated": "2025-08-28T01:50:02.674717"
 }

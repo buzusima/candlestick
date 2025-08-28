@@ -428,14 +428,14 @@ class MT5Connector:
                 account_data['margin_level'] = float('inf')  # ไม่มี positions = margin level สูงสุด
             
             # Debug info
-            print(f"📊 Account Info Retrieved:")
-            print(f"   Login: {account_data['login']}")
-            print(f"   Balance: ${account_data['balance']:,.2f}")
-            print(f"   Equity: ${account_data['equity']:,.2f}")
-            print(f"   Margin: ${account_data['margin']:,.2f}")
-            print(f"   Free Margin: ${account_data['free_margin']:,.2f}")
-            print(f"   Margin Level: {account_data['margin_level']:.2f}%")
-            print(f"   Leverage: 1:{account_data['leverage']}")
+            # print(f"📊 Account Info Retrieved:")
+            # print(f"   Login: {account_data['login']}")
+            # print(f"   Balance: ${account_data['balance']:,.2f}")
+            # print(f"   Equity: ${account_data['equity']:,.2f}")
+            # print(f"   Margin: ${account_data['margin']:,.2f}")
+            # print(f"   Free Margin: ${account_data['free_margin']:,.2f}")
+            # print(f"   Margin Level: {account_data['margin_level']:.2f}%")
+            # print(f"   Leverage: 1:{account_data['leverage']}")
             
             return account_data
             

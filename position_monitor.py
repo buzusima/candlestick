@@ -101,13 +101,9 @@ class PositionMonitor:
     def get_all_positions(self) -> List[Dict]:
         """
         📊 ดึงออเดอร์พร้อมการวิเคราะห์ lot-aware - ENHANCED
-        
-        Returns:
-            List[Dict]: รายการ positions พร้อม lot efficiency analysis
         """
         try:
             if not self.mt5_connector.is_connected:
-                print(f"❌ MT5 not connected - cannot get positions")
                 return []
             
             # ตรวจสอบ cache
@@ -119,7 +115,20 @@ class PositionMonitor:
             account_info = self.mt5_connector.get_account_info()
             
             if raw_positions is None:
-                print(f"ℹ️ No positions found for {self.symbol}")
+                raw_positions = []
+            
+            # แสดง log แค่เมื่อมี positions หรือทุกๆ 20 ครั้ง
+            if not hasattr(self, '_position_check_count'):
+                self._position_check_count = 0
+                
+            if len(raw_positions) > 0:
+                print(f"📊 มี {len(raw_positions)} positions")
+            else:
+                self._position_check_count += 1
+                if self._position_check_count % 20 == 0:
+                    print(f"📊 ไม่มี positions (check #{self._position_check_count})")
+            
+            if len(raw_positions) == 0:
                 self.position_cache = {}
                 return []
             
@@ -129,7 +138,7 @@ class PositionMonitor:
             
             for pos in raw_positions:
                 try:
-                    # ข้อมูลพื้นฐาน (เดิม)
+                    # ข้อมูลพื้นฐาน
                     commission = getattr(pos, 'commission', 0.0)
                     swap = getattr(pos, 'swap', 0.0)
                     comment = getattr(pos, 'comment', '')
@@ -150,7 +159,7 @@ class PositionMonitor:
                         'time_open': datetime.fromtimestamp(pos.time),
                     }
                     
-                    # คำนวณข้อมูลพื้นฐาน (เดิม)
+                    # คำนวณข้อมูลพื้นฐาน
                     open_time = position_data['time_open']
                     age_timedelta = current_time - open_time
                     total_pnl = position_data['profit'] + position_data['swap'] + position_data['commission']
@@ -159,16 +168,13 @@ class PositionMonitor:
                     position_data['age_hours'] = age_timedelta.total_seconds() / 3600
                     position_data['total_pnl'] = round(total_pnl, 2)
                     
-                    # 🆕 LOT-AWARE ANALYSIS
+                    # LOT-AWARE ANALYSIS
                     volume = position_data['volume']
-                    
-                    # คำนวณ efficiency metrics
                     position_data['profit_per_lot'] = round(total_pnl / volume, 2) if volume > 0 else 0
                     position_data['absolute_efficiency'] = abs(position_data['profit_per_lot'])
                     
-                    # 🆕 MARGIN ANALYSIS
+                    # MARGIN ANALYSIS
                     if account_info and account_info.get('margin', 0) > 0:
-                        # ประมาณ margin usage ของ position นี้
                         position_value = position_data['price_current'] * volume
                         leverage = account_info.get('leverage', 100)
                         estimated_margin = position_value / leverage
@@ -181,34 +187,29 @@ class PositionMonitor:
                         position_data['margin_efficiency'] = 0
                         position_data['margin_per_lot'] = 0
                     
-                    # 🆕 ENHANCED STATUS CLASSIFICATION
+                    # ENHANCED STATUS CLASSIFICATION
                     position_data['status'] = self._classify_position_status_enhanced(position_data)
                     position_data['efficiency_category'] = self._classify_efficiency_category(position_data)
                     position_data['close_priority'] = self._calculate_close_priority(position_data)
                     
                     processed_positions.append(position_data)
                     
-                    print(f"💰 Position {pos.ticket}: ${total_pnl:.2f} (${position_data['profit_per_lot']:.1f}/lot) - {position_data['status']}")
-                    
                 except Exception as e:
                     ticket = getattr(pos, 'ticket', 'unknown')
-                    print(f"❌ Error processing position {ticket}: {e}")
                     continue
             
-            # 🆕 UPDATE LOT STATISTICS
+            # UPDATE LOT STATISTICS
             self._update_portfolio_lot_stats(processed_positions)
             
             # อัพเดท cache
             self.position_cache = {pos['id']: pos for pos in processed_positions}
             self.last_update_time = current_time
             
-            print(f"📊 Retrieved {len(processed_positions)} positions with lot-aware analysis")
             return processed_positions
             
         except Exception as e:
-            print(f"❌ Enhanced get positions error: {e}")
             return []
-    
+       
     def _classify_position_status_enhanced(self, position: Dict) -> str:
         """🏷️ จำแนกสถานะ Position แบบ Lot-Aware"""
         try:
@@ -293,58 +294,86 @@ class PositionMonitor:
             return 0.5
     
     def _update_portfolio_lot_stats(self, positions: List[Dict]):
-        """📊 อัพเดทสถิติ Portfolio แบบ Volume-Weighted"""
+        """อัพเดทสถิติ portfolio - แก้ zero division และ inf values"""
         try:
             if not positions:
+                # รีเซ็ตค่าเมื่อไม่มี positions
+                self.lot_stats = {
+                    'total_buy_volume': 0.0,
+                    'total_sell_volume': 0.0, 
+                    'avg_profit_per_lot_buy': 0.0,
+                    'avg_profit_per_lot_sell': 0.0,
+                    'volume_imbalance_ratio': 0.0,
+                    'margin_efficiency_score': 0.0
+                }
                 return
             
-            # แยกตามประเภท
+            # คำนวณ volume และ profit โดยแยก type
             buy_positions = [p for p in positions if p.get('type') == 'BUY']
             sell_positions = [p for p in positions if p.get('type') == 'SELL']
             
-            # คำนวณ volume totals
             total_buy_volume = sum(p.get('volume', 0) for p in buy_positions)
             total_sell_volume = sum(p.get('volume', 0) for p in sell_positions)
+            
+            # คำนวณ average profit per lot - แก้ zero division
+            if total_buy_volume > 0:
+                total_buy_profit = sum(p.get('total_pnl', 0) for p in buy_positions)
+                avg_profit_buy = total_buy_profit / total_buy_volume
+            else:
+                avg_profit_buy = 0.0
+            
+            if total_sell_volume > 0:
+                total_sell_profit = sum(p.get('total_pnl', 0) for p in sell_positions)
+                avg_profit_sell = total_sell_profit / total_sell_volume
+            else:
+                avg_profit_sell = 0.0
+            
+            # คำนวณ volume imbalance - แก้ zero division
             total_volume = total_buy_volume + total_sell_volume
-            
-            # คำนวณ weighted profit per lot
-            buy_weighted_profit = sum(p.get('total_pnl', 0) for p in buy_positions)
-            sell_weighted_profit = sum(p.get('total_pnl', 0) for p in sell_positions)
-            
-            avg_profit_per_lot_buy = buy_weighted_profit / total_buy_volume if total_buy_volume > 0 else 0
-            avg_profit_per_lot_sell = sell_weighted_profit / total_sell_volume if total_sell_volume > 0 else 0
-            
-            # คำนวณ volume imbalance
-            volume_imbalance = 0
             if total_volume > 0:
-                buy_ratio = total_buy_volume / total_volume
-                sell_ratio = total_sell_volume / total_volume
-                volume_imbalance = abs(buy_ratio - sell_ratio)
+                imbalance = abs(total_buy_volume - total_sell_volume) / total_volume
+            else:
+                imbalance = 0.0
             
-            # คำนวณ margin efficiency
+            # คำนวณ margin efficiency - แก้ inf values
             total_estimated_margin = sum(p.get('estimated_margin', 0) for p in positions)
             total_profit = sum(p.get('total_pnl', 0) for p in positions)
-            margin_efficiency_score = total_profit / total_estimated_margin if total_estimated_margin > 0 else 0
             
-            # อัพเดท stats
-            self.lot_stats.update({
+            if total_estimated_margin > 0:
+                margin_efficiency = total_profit / total_estimated_margin
+            else:
+                margin_efficiency = 0.0
+            
+            # อัพเดทสถิติ
+            self.lot_stats = {
                 'total_buy_volume': round(total_buy_volume, 2),
                 'total_sell_volume': round(total_sell_volume, 2),
-                'avg_profit_per_lot_buy': round(avg_profit_per_lot_buy, 2),
-                'avg_profit_per_lot_sell': round(avg_profit_per_lot_sell, 2),
-                'volume_imbalance_ratio': round(volume_imbalance, 3),
-                'margin_efficiency_score': round(margin_efficiency_score, 4),
-                'total_positions': len(positions),
-                'total_volume': round(total_volume, 2),
-                'weighted_portfolio_pnl': round(total_profit, 2)
-            })
+                'avg_profit_per_lot_buy': round(avg_profit_buy, 1),
+                'avg_profit_per_lot_sell': round(avg_profit_sell, 1),
+                'volume_imbalance_ratio': round(imbalance, 3),
+                'margin_efficiency_score': round(margin_efficiency, 4)
+            }
             
-            print(f"📊 Portfolio Stats: {total_buy_volume:.2f} BUY / {total_sell_volume:.2f} SELL lots")
-            print(f"   💰 Efficiency: ${avg_profit_per_lot_buy:.1f}/lot BUY, ${avg_profit_per_lot_sell:.1f}/lot SELL")
-            print(f"   ⚖️ Imbalance: {volume_imbalance:.1%}, Margin Efficiency: {margin_efficiency_score:.4f}")
+            # แสดง log แบบสั้นๆ ทุกๆ 10 ครั้ง
+            if not hasattr(self, '_stats_log_count'):
+                self._stats_log_count = 0
+                
+            self._stats_log_count += 1
+            if self._stats_log_count % 10 == 0:
+                print(f"Portfolio: {total_buy_volume:.2f} BUY, {total_sell_volume:.2f} SELL lots")
+                print(f"Efficiency: ${avg_profit_buy:.1f}/lot BUY, ${avg_profit_sell:.1f}/lot SELL") 
+                print(f"Imbalance: {imbalance:.1%}")
             
         except Exception as e:
-            print(f"❌ Portfolio lot stats error: {e}")
+            print(f"Portfolio stats error: {e}")
+            self.lot_stats = {
+                'total_buy_volume': 0.0,
+                'total_sell_volume': 0.0,
+                'avg_profit_per_lot_buy': 0.0,
+                'avg_profit_per_lot_sell': 0.0,
+                'volume_imbalance_ratio': 0.0,
+                'margin_efficiency_score': 0.0
+            }
     
     # ==========================================
     # 🧠 ENHANCED SMART CLOSE ANALYSIS
@@ -396,9 +425,13 @@ class PositionMonitor:
             return []
     
     def _find_margin_optimization_opportunities(self, positions: List[Dict]) -> List[Dict]:
-        """🔧 หาโอกาส Margin Optimization - NEW"""
+        """หาโอกาส Margin Optimization - แก้ปัญหา inf% และ logic"""
         try:
             margin_actions = []
+            
+            # เช็ค positions ก่อน - ถ้าไม่มี positions จริงๆ
+            if not positions or len(positions) == 0:
+                return margin_actions
             
             # ตรวจสอบ margin usage ปัจจุบัน
             account_info = self.mt5_connector.get_account_info()
@@ -406,23 +439,41 @@ class PositionMonitor:
                 return margin_actions
             
             margin_level = account_info.get('margin_level', 1000)
+            margin_used = account_info.get('margin', 0)
             
-            print(f"🔧 Margin optimization analysis (Current level: {margin_level:.1f}%)")
+            # แสดง margin level ที่อ่านง่าย
+            if margin_level == float('inf') or margin_used == 0:
+                print(f"Margin analysis (No Margin Used) - {len(positions)} positions")
+            elif margin_level > 10000:
+                print(f"Margin analysis (Very High) - {len(positions)} positions")
+            else:
+                print(f"Margin analysis ({margin_level:.1f}%) - {len(positions)} positions")
             
-            # ถ้า margin level ต่ำ → หา positions ที่ใช้ margin มากแต่ไม่คุ้มค่า
-            if margin_level < 300:  # Margin pressure
+            # เช็ค margin pressure จริงๆ - ใช้ margin ที่ใช้จริงเป็นเกณฑ์
+            has_margin_pressure = False
+            
+            if margin_used > 0:  # มี margin ที่ใช้จริง
+                if margin_level < 300 and margin_level != float('inf'):
+                    has_margin_pressure = True
+                    print("   ⚠️ มี margin pressure - กำลังหา optimization")
+            
+            # ถ้ามี margin pressure หาวิธี optimization
+            if has_margin_pressure:
                 
                 # หา positions ที่มี margin efficiency ต่ำ
                 low_efficiency_positions = [
                     p for p in positions 
-                    if p.get('margin_efficiency', 0) < 0.001  # margin efficiency ต่ำมาก
-                    and p.get('estimated_margin', 0) > 50    # ใช้ margin มาก
+                    if p.get('margin_efficiency', 0) < 0.001
+                    and p.get('estimated_margin', 0) > 50
                 ]
+                
+                if low_efficiency_positions:
+                    print(f"   พบ {len(low_efficiency_positions)} positions ที่ไม่คุ้ม margin")
                 
                 # เรียงตาม margin usage (มากไปน้อย)
                 low_efficiency_positions.sort(key=lambda x: x.get('estimated_margin', 0), reverse=True)
                 
-                for pos in low_efficiency_positions[:5]:  # เอาแค่ 5 ตัวแรก
+                for pos in low_efficiency_positions[:5]:
                     
                     # หา hedge partner สำหรับ position นี้
                     hedge_partners = self._find_hedge_partners_for_position(pos, positions)
@@ -431,7 +482,7 @@ class PositionMonitor:
                         total_margin_freed = pos.get('estimated_margin', 0) + sum(p.get('estimated_margin', 0) for p in hedge_partners)
                         total_profit = pos.get('total_pnl', 0) + sum(p.get('total_pnl', 0) for p in hedge_partners)
                         
-                        if total_profit >= -5.0:  # ยอมขาดทุนได้เล็กน้อยเพื่อลด margin
+                        if total_profit >= -5.0:  # ยอมขาดทุนเล็กน้อย
                             margin_action = {
                                 'action_type': 'margin_optimization',
                                 'primary_position': pos['id'],
@@ -439,15 +490,19 @@ class PositionMonitor:
                                 'margin_freed': total_margin_freed,
                                 'net_profit': total_profit,
                                 'efficiency_gain': total_margin_freed / max(abs(total_profit), 1),
-                                'priority': 1,  # สำคัญสุด
+                                'priority': 1,
                                 'reason': f"Free ${total_margin_freed:.0f} margin, Net: ${total_profit:.2f}"
                             }
                             margin_actions.append(margin_action)
+            else:
+                # ไม่มี margin pressure - ไม่ต้องทำอะไร
+                if len(positions) > 0:
+                    print("   ไม่จำเป็นต้อง optimize margin")
             
             return margin_actions
             
         except Exception as e:
-            print(f"❌ Margin optimization error: {e}")
+            print(f"Margin optimization error: {e}")
             return []
     
     def _find_volume_balance_opportunities(self, positions: List[Dict]) -> List[Dict]:
@@ -1152,7 +1207,7 @@ class PositionMonitor:
                 'magic': pos.magic,
                 'comment': f"Close_{reason}",
                 'type_time': mt5.ORDER_TIME_GTC,
-                'type_filling': mt5.ORDER_FILLING_IOC
+                'type_filling': mt5.ORDER_FILLING_FOK
             }
             
             # ส่งคำสั่งปิด

@@ -1515,7 +1515,7 @@ class PositionMonitor:
             # รวมกัน
             final_threshold = base_threshold + spread_buffer
             
-            print(f"💰 Volume-adjusted: {volume:.2f}L → ${base_threshold:.1f} + ${spread_buffer:.1f}sp = ${final_threshold:.1f}")
+            # print(f"💰 Volume-adjusted: {volume:.2f}L → ${base_threshold:.1f} + ${spread_buffer:.1f}sp = ${final_threshold:.1f}")
             
             return max(final_threshold, 1.0)  # อย่างต่ำ $1
             

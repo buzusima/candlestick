@@ -145,33 +145,32 @@ class OrderExecutor:
             return None
     
     def _calculate_dynamic_lot_size(self, signal_data: Dict) -> float:
-        """🧮 คำนวณ lot size ตาม signal strength - EASIER VERSION"""
         try:
             strength_score = signal_data.get('strength', 0.5)
             
-            # ปรับ threshold ให้ง่ายขึ้น
-            if strength_score >= 0.7:      # ลดจาก 0.8
-                lot_multiplier = 8.0
-            elif strength_score >= 0.55:  # ลดจาก 0.65
-                lot_multiplier = 5.0  
-            elif strength_score >= 0.4:   # ลดจาก 0.5
-                lot_multiplier = 3.0
-            elif strength_score >= 0.25:  # ลดจาก 0.35
-                lot_multiplier = 2.0
-            else:                          # <0.25
-                lot_multiplier = 1.0
+            # ปรับให้เป็นการคูณของ 0.01
+            if strength_score >= 0.9:      
+                lot_multiplier = 8.0    # 0.08 lots
+            elif strength_score >= 0.75:  
+                lot_multiplier = 5.0    # 0.05 lots
+            elif strength_score >= 0.6:   
+                lot_multiplier = 3.0    # 0.03 lots
+            elif strength_score >= 0.45:
+                lot_multiplier = 2.0    # 0.02 lots
+            else:
+                lot_multiplier = 1.0    # 0.01 lots
             
             calculated_lot = self.base_lot * lot_multiplier
             final_lot = max(self.min_lot, min(calculated_lot, self.max_lot))
             
-            print(f"🧮 Dynamic lot: strength {strength_score:.2f} → {final_lot:.2f} lots (x{lot_multiplier})")
+            print(f"Dynamic lot: strength {strength_score:.2f} → {final_lot:.2f} lots (x{lot_multiplier})")
             
             return final_lot
             
         except Exception as e:
-            print(f"❌ Dynamic lot calculation error: {e}")
+            print(f"Dynamic lot calculation error: {e}")
             return self.base_lot
-       
+           
     def _send_market_order(self, order_type: str, lot_size: float, signal_data: Dict) -> Optional[Dict]:
         """
         📤 ส่ง Market Order ผ่าน MT5 (COMPLETE FIXED)
@@ -428,33 +427,35 @@ class OrderExecutor:
     # ==========================================
     
     def _calculate_lot_size(self, signal_data: Dict) -> float:
-        """
-        📏 คำนวณ Lot Size แบบ Dynamic
-        
-        Args:
-            signal_data: ข้อมูล signal
-            
-        Returns:
-            float: ขนาด lot ที่เหมาะสม
-        """
         try:
             # ดึงข้อมูลบัญชี
             if not self.mt5_connector.is_connected:
-                print(f"❌ MT5 not connected - using base lot")
                 return self.base_lot
             
             account_info = self.mt5_connector.get_account_info()
             if not account_info:
-                print(f"⚠️ No account info - using base lot")
                 return self.base_lot
             
             balance = account_info.get('balance', 10000)
             signal_strength = signal_data.get('strength', 0.6)
             lot_multiplier = signal_data.get('recommended_lot_multiplier', 1.0)
             
-            # คำนวณ lot แบบ dynamic ตาม strength
-            dynamic_lot = self._calculate_dynamic_lot_size(signal_data)
-            final_lot = dynamic_lot * lot_multiplier            
+            # 🔧 เพิ่มการคำนวณ dynamic lot ตรงนี้
+            if signal_strength >= 0.7:
+                dynamic_multiplier = 8.0
+            elif signal_strength >= 0.55:
+                dynamic_multiplier = 5.0  
+            elif signal_strength >= 0.4:
+                dynamic_multiplier = 3.0
+            elif signal_strength >= 0.25:
+                dynamic_multiplier = 2.0
+            else:
+                dynamic_multiplier = 1.0
+            
+            print(f"🧮 Dynamic lot: strength {signal_strength:.2f} → x{dynamic_multiplier}")
+            
+            # คำนวณ lot
+            final_lot = self.base_lot * dynamic_multiplier * lot_multiplier
             
             # ปรับตาม balance
             final_lot = self._apply_balance_scaling(final_lot, balance)
@@ -463,11 +464,7 @@ class OrderExecutor:
             final_lot = max(self.min_lot, min(self.max_lot, final_lot))
             final_lot = round(final_lot, 2)
             
-            print(f"📏 Lot calculation:")
-            print(f"   Balance: ${balance:.2f}")
-            print(f"   Signal strength: {signal_strength:.2f}")
-            print(f"   Multiplier: {lot_multiplier:.2f}")
-            print(f"   Final lot: {final_lot:.2f}")
+            print(f"📏 Final lot: {final_lot:.2f}")
             
             return final_lot
             
@@ -479,13 +476,13 @@ class OrderExecutor:
         """📊 ปรับ Lot Size ตาม Balance"""
         try:
             if balance >= 10000:
-                scale_factor = 2.0
+                scale_factor = 1.0
             elif balance >= 5000:
-                scale_factor = 1.5
+                scale_factor = 1.0
             elif balance >= 1000:
                 scale_factor = 1.0
             else:
-                scale_factor = 0.5
+                scale_factor = 1.0
             
             return lot_size * scale_factor
             

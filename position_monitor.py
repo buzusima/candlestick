@@ -55,7 +55,7 @@ class PositionMonitor:
         self.high_margin_usage_threshold = 70.0  # % เมื่อ margin usage สูง
         
         # Smart close settings (ปรับใหม่)
-        self.max_losing_age_hours = self.position_config.get("max_losing_age_hours", 24)
+        self.max_losing_age_hours = self.position_config.get("max_losing_age_hours", 8)
         self.min_net_profit_to_close = self.position_config.get("min_net_profit_to_close", 2.0)  # ลดเหลือ $2
         self.portfolio_balance_threshold = self.position_config.get("portfolio_balance_threshold", 0.65)  # ปรับเป็น 65%
         

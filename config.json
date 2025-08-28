@@ -7,10 +7,10 @@
   
   "trading": {
     "symbol": "XAUUSD.v",
-    "timeframe": "M1",
+    "timeframe": "M5",
     "market_orders_only": true,
-    "signal_cooldown_seconds": 20,
-    "max_signals_per_hour": 80,
+    "signal_cooldown_seconds": 60,
+    "max_signals_per_hour": 40,
     "max_positions": 50,
     "auto_trading": true,
     "high_frequency_mode": true

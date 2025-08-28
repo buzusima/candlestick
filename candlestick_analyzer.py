@@ -48,7 +48,7 @@ class CandlestickAnalyzer:
         
         # การตั้งค่าพื้นฐาน
         self.symbol = config.get("trading", {}).get("symbol", "XAUUSD.v")
-        self.timeframe = mt5.TIMEFRAME_M1
+        self.timeframe = mt5.TIMEFRAME_M5
         
         # การตั้งค่า analysis parameters
         self.min_candles_required = 3  # สำหรับ mini trend
@@ -85,7 +85,7 @@ class CandlestickAnalyzer:
         # 🆕 CANDLE STATE TRACKING
         self.last_candle_signature = None
         self.last_processed_candle_time = datetime.min
-        self.minimum_time_gap_seconds = 30
+        self.minimum_time_gap_seconds = 300
         
         # 🆕 PERFORMANCE TRACKING
         self.analysis_count = 0
@@ -419,13 +419,13 @@ class CandlestickAnalyzer:
     
     def _analyze_multi_candle_context(self, candles: List[Dict]) -> Dict:
         """
-        🔍 วิเคราะห์ context หลายแท่งสำหรับ Mini Trend
+        🔍 วิเคราะห์ context หลายแท่งสำหรับ Mini Trend - CLEANED VERSION
         
         Args:
             candles: รายการแท่งเทียนทั้งหมด
             
         Returns:
-            Dict: ข้อมูล context สำหรับ mini trend analysis
+            Dict: ข้อมูล context สำหรับ mini trend analysis (ไม่มี old calculations)
         """
         try:
             if len(candles) < 3:
@@ -453,13 +453,13 @@ class CandlestickAnalyzer:
             current_body_ratio = recent_3_candles[-1]['body_ratio']
             min_body_ratio = self.config.get("smart_entry_rules", {}).get("mini_trend", {}).get("min_body_ratio", 0.05)
             
-            # Mini trend signals
+            # Mini trend signals (ลบ old strength calculations)
             mini_trend_signals = {}
             
             # BUY condition: เขียว 2 ใน 3 + แท่งปัจจุบันเขียว + body >= 5%
             if green_count >= 2 and current_color == 'green' and current_body_ratio >= min_body_ratio:
                 mini_trend_signals['buy_mini_trend_detected'] = True
-                mini_trend_signals['buy_trend_strength'] = self._calculate_mini_trend_strength(recent_3_candles, 'bullish')
+                # ลบ: mini_trend_signals['buy_trend_strength'] = self._calculate_mini_trend_strength(recent_3_candles, 'bullish')
                 print(f"🟢 Mini trend BUY detected: {colors}")
             else:
                 mini_trend_signals['buy_mini_trend_detected'] = False
@@ -467,7 +467,7 @@ class CandlestickAnalyzer:
             # SELL condition: แดง 2 ใน 3 + แท่งปัจจุบันแดง + body >= 5%  
             if red_count >= 2 and current_color == 'red' and current_body_ratio >= min_body_ratio:
                 mini_trend_signals['sell_mini_trend_detected'] = True
-                mini_trend_signals['sell_trend_strength'] = self._calculate_mini_trend_strength(recent_3_candles, 'bearish')
+                # ลบ: mini_trend_signals['sell_trend_strength'] = self._calculate_mini_trend_strength(recent_3_candles, 'bearish')
                 print(f"🔴 Mini trend SELL detected: {colors}")
             else:
                 mini_trend_signals['sell_mini_trend_detected'] = False
@@ -481,39 +481,7 @@ class CandlestickAnalyzer:
         except Exception as e:
             print(f"❌ Multi-candle context error: {e}")
             return {'multi_candle_context': 'error'}
-    
-    def _calculate_mini_trend_strength(self, candles: List[Dict], direction: str) -> float:
-        """
-        💪 คำนวณความแข็งแกร่งของ mini trend
-        """
-        try:
-            if len(candles) < 3:
-                return 0.5
             
-            strength = 0.5  # Base strength
-            
-            # 1. Consistency factor (แท่งสีเดียวกันเยอะ = แรง)
-            target_color = 'green' if direction == 'bullish' else 'red'
-            same_color_count = sum(1 for c in candles if c['candle_color'] == target_color)
-            consistency_factor = same_color_count / len(candles)
-            strength += consistency_factor * 0.3
-            
-            # 2. Body size factor (แท่งใหญ่ = แรง)
-            avg_body_ratio = sum(c['body_ratio'] for c in candles) / len(candles)
-            body_factor = min(avg_body_ratio * 2, 0.2)
-            strength += body_factor
-            
-            # 3. Price movement factor
-            total_movement = abs(candles[-1]['close'] - candles[0]['open'])
-            movement_factor = min(total_movement / 2.0, 0.2)  # สูงสุด +0.2
-            strength += movement_factor
-            
-            return round(min(strength, 1.0), 3)
-            
-        except Exception as e:
-            print(f"❌ Mini trend strength error: {e}")
-            return 0.5
-    
     # ==========================================
     # 🔧 VOLUME ANALYSIS (เดิม + ปรับปรุง)
     # ==========================================

@@ -644,34 +644,181 @@ class SignalGenerator:
             return False
     
     def _check_price_movement_filter(self, candles: List[Dict]) -> bool:
-        """🔍 ตรวจสอบการเคลื่อนไหวของราคา"""
+        """
+        🔍 ตรวจสอบการเคลื่อนไหวของราคา - FLEXIBLE VERSION
+        
+        🎯 หลักการใหม่:
+        - Base threshold = 0.05 points (ลดจาก 0.20)
+        - Dynamic adjustment ตาม context
+        - Smart exceptions สำหรับสถานการณ์พิเศษ
+        """
         try:
             if len(candles) < 2:
-                return False
+                return True  # ข้อมูลน้อย = อนุญาต
             
             movement_config = self.filter_config.get("price_movement_filter", {})
-            min_movement = movement_config.get("min_price_change_points", 0.20)
+            
+            # 📊 ค่า Base (ผ่อนปรนแล้ว)
+            base_min_movement = movement_config.get("min_price_change_points", 0.05)  # ลดจาก 0.20
             max_movement = movement_config.get("max_movement_points", 5.00)
             
             current_close = candles[-1]['close']
             previous_close = candles[-2]['close']
             price_change = abs(current_close - previous_close)
             
-            if price_change < min_movement:
-                print(f"❌ เคลื่อนไหวน้อย: {price_change:.3f} < {min_movement}")
-                return False
+            print(f"📊 Movement Analysis:")
+            print(f"   Current movement: {price_change:.3f} points")
+            print(f"   Base threshold: {base_min_movement:.3f} points")
             
+            # ==========================================
+            # 🎯 SMART DYNAMIC THRESHOLD CALCULATION
+            # ==========================================
+            
+            # 1️⃣ Time-based adjustments
+            from datetime import datetime
+            current_hour = datetime.now().hour
+            time_multiplier = 1.0
+            time_desc = ""
+            
+            if 1 <= current_hour < 9:    # Asian session - ช้า
+                time_multiplier = 0.6  # ผ่อนปรน 40%
+                time_desc = "Asian (quiet)"
+            elif 22 <= current_hour or current_hour < 2:  # Overnight - เงียบ
+                time_multiplier = 0.5  # ผ่อนปรน 50%
+                time_desc = "Overnight (very quiet)"
+            elif 9 <= current_hour < 11:   # London open - active
+                time_multiplier = 0.8  # ผ่อนปรนเล็กน้อย
+                time_desc = "London open"
+            elif 17 <= current_hour < 19:  # NY open - active
+                time_multiplier = 0.8  # ผ่อนปรนเล็กน้อย
+                time_desc = "NY open"
+            else:
+                time_multiplier = 0.7  # ผ่อนปรนปกติ
+                time_desc = "Regular hours"
+            
+            # 2️⃣ Market volatility adjustment
+            volatility_multiplier = 1.0
+            if len(candles) >= 5:
+                # คำนวณ average movement ใน 5 candles ล่าสุด
+                recent_movements = []
+                for i in range(len(candles)-4, len(candles)):
+                    if i > 0:
+                        movement = abs(candles[i]['close'] - candles[i-1]['close'])
+                        recent_movements.append(movement)
+                
+                if recent_movements:
+                    avg_movement = sum(recent_movements) / len(recent_movements)
+                    if avg_movement < 0.1:  # ตลาดเงียบมาก
+                        volatility_multiplier = 0.4  # ผ่อนปรนมาก
+                    elif avg_movement > 0.5:  # ตลาดเคลื่อนไหวมาก
+                        volatility_multiplier = 1.2  # เข้มงวดขึ้นเล็กน้อย
+                    else:
+                        volatility_multiplier = 0.7  # ผ่อนปรนปกติ
+                    
+                    print(f"   Recent avg movement: {avg_movement:.3f} → vol_mult: {volatility_multiplier:.1f}")
+            
+            # 3️⃣ Trend continuation bonus
+            trend_bonus = 1.0
+            if len(candles) >= 3:
+                # ตรวจสอบว่าเป็น continuation ของ trend หรือไม่
+                prev2_close = candles[-3]['close']
+                prev1_close = candles[-2]['close'] 
+                curr_close = candles[-1]['close']
+                
+                # ทิศทางเดียวกัน = trend continuation
+                if ((prev1_close > prev2_close and curr_close > prev1_close) or 
+                    (prev1_close < prev2_close and curr_close < prev1_close)):
+                    trend_bonus = 0.5  # ผ่อนปรน 50% สำหรับ trend continuation
+                    print(f"   🔄 Trend continuation detected → bonus: {trend_bonus:.1f}")
+            
+            # ==========================================
+            # 🧮 CALCULATE FINAL DYNAMIC THRESHOLD
+            # ==========================================
+            
+            final_threshold = base_min_movement * time_multiplier * volatility_multiplier * trend_bonus
+            final_threshold = max(0.02, final_threshold)  # อย่างต่ำ 0.02 points (2 pips)
+            
+            print(f"   📐 Dynamic calculation:")
+            print(f"      Base: {base_min_movement:.3f}")
+            print(f"      × Time ({time_desc}): {time_multiplier:.1f}")
+            print(f"      × Volatility: {volatility_multiplier:.1f}")
+            print(f"      × Trend bonus: {trend_bonus:.1f}")
+            print(f"      = Final threshold: {final_threshold:.3f} points")
+            
+            # ==========================================
+            # 🎯 SPECIAL EXCEPTION RULES
+            # ==========================================
+            
+            special_pass = False
+            special_reason = ""
+            
+            # Exception 1: แม้การเคลื่อนไหวน้อย แต่เป็น breakout
+            if len(candles) >= 3 and price_change >= 0.03:  # อย่างน้อย 0.03 points
+                prev_high = max(candles[-3]['high'], candles[-2]['high'])
+                prev_low = min(candles[-3]['low'], candles[-2]['low'])
+                
+                if current_close > prev_high or current_close < prev_low:
+                    special_pass = True
+                    special_reason = f"Breakout detected (move: {price_change:.3f})"
+            
+            # Exception 2: การเคลื่อนไหวต่อเนื่องในทิศทางเดียวกัน
+            if not special_pass and len(candles) >= 4 and price_change >= 0.025:
+                # ตรวจสอบ momentum 3 candles
+                moves = []
+                for i in range(len(candles)-3, len(candles)):
+                    if i > 0:
+                        move = candles[i]['close'] - candles[i-1]['close']
+                        moves.append(move)
+                
+                if len(moves) >= 2:
+                    # ทิศทางเดียวกัน
+                    same_direction = all(m > 0 for m in moves) or all(m < 0 for m in moves)
+                    if same_direction:
+                        special_pass = True
+                        special_reason = f"Momentum continuation (move: {price_change:.3f})"
+            
+            # Exception 3: ช่วงเวลาเงียบมาก - อนุญาตเกือบทุกอย่าง
+            if not special_pass and (22 <= current_hour or current_hour < 6):
+                if price_change >= 0.02:  # แค่ 2 pips ก็พอ
+                    special_pass = True
+                    special_reason = f"Quiet hours exception (move: {price_change:.3f})"
+            
+            # ==========================================
+            # 🏁 FINAL DECISION
+            # ==========================================
+            
+            # ตรวจสอบ maximum movement (ป้องกัน gap/spike)
             if price_change > max_movement:
-                print(f"❌ เคลื่อนไหวมาก (Gap?): {price_change:.3f} > {max_movement}")
+                print(f"❌ เคลื่อนไหวมากเกินไป: {price_change:.3f} > {max_movement}")
+                print(f"   อาจเป็น Gap หรือ Spike - ข้าม")
                 return False
             
-            print(f"✅ การเคลื่อนไหว OK: {price_change:.3f} points")
-            return True
+            # ใช้ special exception
+            if special_pass:
+                print(f"✅ Special exception: {special_reason}")
+                return True
             
+            # ตรวจสอบ threshold ปกติ
+            if price_change >= final_threshold:
+                print(f"✅ Movement OK: {price_change:.3f} >= {final_threshold:.3f}")
+                return True
+            else:
+                print(f"⚠️ Movement low: {price_change:.3f} < {final_threshold:.3f}")
+                print(f"   แต่เพิ่ม flexibility ให้ระบบ...")
+                
+                # 🎯 LAST RESORT: ให้ pass บางครั้ง (30% chance)
+                import random
+                if random.random() < 0.3:
+                    print(f"🎲 Random flexibility pass (30% chance)")
+                    return True
+                else:
+                    print(f"🚫 Movement filter blocked")
+                    return False
+                
         except Exception as e:
             print(f"❌ Movement filter error: {e}")
-            return True
-    
+            return True  # Error = อนุญาต
+        
     def _check_session_filter(self, signal: Dict) -> bool:
         """🕐 ตรวจสอบ session activity"""
         try:

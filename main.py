@@ -577,6 +577,10 @@ class EnhancedPureCandlestickGUI:
             # 🆕 Use Enhanced Position Monitor
             self.position_monitor = PositionMonitor(self.mt5_connector, self.config)
             self.role_manager = SmartOrderRoleManager(self.mt5_connector, self.config)
+            
+            # ✅ เชื่อม role_manager กับ position_monitor
+            self.role_manager.set_position_monitor(self.position_monitor)
+            
             self.performance_tracker = PerformanceTracker(self.config)
             self.risk_manager = RiskManager(self.mt5_connector, self.config)
             
@@ -589,10 +593,11 @@ class EnhancedPureCandlestickGUI:
             
             self.log("✅ All Enhanced Pure Candlestick components initialized")
             self.log("🆕 Lot-aware analysis enabled")
+            self.log("🔗 Role manager linked to position monitor")  # ✅ เพิ่ม log confirmation
             
         except Exception as e:
             self.log(f"❌ Component initialization error: {e}")
-            
+
     def execute_margin_optimization(self):
         """🔧 Optimize Margin"""
         if self.position_monitor:
@@ -796,7 +801,7 @@ class EnhancedPureCandlestickGUI:
                                 self.log(f"   ... and {len(profitable_positions)-5} more profitable positions")
                         else:
                             self.log(f"🔍 CORRECTED PROFIT CHECK: No positions with profit > $15 found")
-                                                
+
                     self.update_enhanced_positions_display(positions)
                     
                     # 🧠 Smart Role Management + DEBUG

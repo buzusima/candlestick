@@ -526,7 +526,8 @@ class SignalGenerator:
     def _update_portfolio_stats(self):
         """📊 อัพเดทสถิติ portfolio - FIXED"""
         try:
-            if not self.mt5_connector.is_connected:
+            # ✅ แก้ไข: ใช้ mt5_connector ผ่าน candlestick_analyzer
+            if not self.candlestick_analyzer or not self.candlestick_analyzer.mt5_connector.is_connected:
                 return
             
             # ดึง positions
@@ -534,8 +535,6 @@ class SignalGenerator:
             if not raw_positions:
                 self.portfolio_stats = {'buy_positions': 0, 'sell_positions': 0, 'last_update': datetime.now()}
                 return
-            
-            positions = []
             
             # ✅ แก้การนับ BUY/SELL - ใช้ raw MT5 data
             buy_count = 0
@@ -561,7 +560,7 @@ class SignalGenerator:
         except Exception as e:
             print(f"❌ Portfolio stats update error: {e}")
             self.portfolio_stats = {'buy_positions': 0, 'sell_positions': 0, 'last_update': datetime.now()}
-    
+
     def _apply_portfolio_balance(self, trend_signal: Dict) -> Optional[Dict]:
         """
         ⚖️ ปรับ signal ตาม portfolio balance

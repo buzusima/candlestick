@@ -100,7 +100,7 @@ class PositionMonitor:
     
     def get_all_positions(self) -> List[Dict]:
         """
-        📊 ดึงออเดอร์พร้อมการวิเคราะห์ lot-aware - ENHANCED
+        📊 ดึงออเดอร์พร้อมการวิเคราะห์ lot-aware - FIXED
         """
         try:
             if not self.mt5_connector.is_connected:
@@ -144,10 +144,12 @@ class PositionMonitor:
                     comment = getattr(pos, 'comment', '')
                     magic = getattr(pos, 'magic', 0)
                     
+                    # ✅ แก้การแปลง type - เก็บเป็นตัวเลข + string
                     position_data = {
                         'id': pos.ticket,
                         'symbol': pos.symbol,
-                        'type': 'BUY' if pos.type == mt5.POSITION_TYPE_BUY else 'SELL',
+                        'type': pos.type,  # เก็บตัวเลข 0=BUY, 1=SELL
+                        'type_str': 'BUY' if pos.type == mt5.POSITION_TYPE_BUY else 'SELL',  # เก็บ string ด้วย
                         'volume': float(pos.volume),
                         'price_open': float(pos.price_open),
                         'price_current': float(pos.price_current),

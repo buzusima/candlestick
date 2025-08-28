@@ -524,26 +524,34 @@ class SignalGenerator:
     # ==========================================
     
     def _update_portfolio_stats(self):
-        """
-        📊 อัพเดทสถิติ portfolio (BUY:SELL positions)
-        """
+        """📊 อัพเดทสถิติ portfolio - FIXED"""
         try:
-            # ดึงข้อมูล positions จาก MT5
-            symbol = self.config.get("trading", {}).get("symbol", "XAUUSD.v")
-            positions = mt5.positions_get(symbol=symbol)
+            # ✅ แก้ไข: ใช้ mt5_connector ผ่าน candlestick_analyzer
+            if not self.candlestick_analyzer or not self.candlestick_analyzer.mt5_connector.is_connected:
+                return
             
-            if positions is None:
-                positions = []
+            # ดึง positions
+            raw_positions = mt5.positions_get()
+            if not raw_positions:
+                self.portfolio_stats = {'buy_positions': 0, 'sell_positions': 0, 'last_update': datetime.now()}
+                return
             
-            buy_count = len([p for p in positions if p.type == mt5.POSITION_TYPE_BUY])
-            sell_count = len([p for p in positions if p.type == mt5.POSITION_TYPE_SELL])
+            # ✅ แก้การนับ BUY/SELL - ใช้ raw MT5 data
+            buy_count = 0
+            sell_count = 0
+            
+            for p in raw_positions:
+                if p.type == mt5.POSITION_TYPE_BUY:
+                    buy_count += 1
+                elif p.type == mt5.POSITION_TYPE_SELL:
+                    sell_count += 1
             
             self.portfolio_stats = {
                 'buy_positions': buy_count,
                 'sell_positions': sell_count,
-                'total_positions': len(positions),
-                'buy_ratio': buy_count / max(len(positions), 1),
-                'sell_ratio': sell_count / max(len(positions), 1),
+                'total_positions': len(raw_positions),
+                'buy_ratio': buy_count / max(len(raw_positions), 1),
+                'sell_ratio': sell_count / max(len(raw_positions), 1),
                 'last_update': datetime.now()
             }
             
@@ -552,7 +560,7 @@ class SignalGenerator:
         except Exception as e:
             print(f"❌ Portfolio stats update error: {e}")
             self.portfolio_stats = {'buy_positions': 0, 'sell_positions': 0, 'last_update': datetime.now()}
-    
+
     def _apply_portfolio_balance(self, trend_signal: Dict) -> Optional[Dict]:
         """
         ⚖️ ปรับ signal ตาม portfolio balance
@@ -1152,3 +1160,170 @@ class SignalGenerator:
             
         except Exception as e:
             return {'error': str(e)}
+        
+
+    def should_allow_entry(self, signal_data: Dict, positions: List) -> Dict:
+        """
+        ⚖️ เช็คว่าควรเข้าออเดอร์ไหม ตาม portfolio balance + exit opportunities - FIXED
+        """
+        try:
+            action = signal_data.get('action')
+            
+            if action not in ['BUY', 'SELL']:
+                return {'allow': True, 'adjusted_action': action, 'reason': 'No trade signal', 'lot_multiplier': 1.0}
+            
+            # ถ้าไม่มี positions → อนุญาตปกติ
+            if not positions:
+                return {'allow': True, 'adjusted_action': action, 'reason': 'Empty portfolio', 'lot_multiplier': 1.0}
+            
+            # วิเคราะห์ portfolio balance - FIXED
+            buy_count = 0
+            sell_count = 0
+            
+            for p in positions:
+                if isinstance(p, dict):
+                    pos_type = p.get('type', 'unknown')
+                    if pos_type == 'BUY':
+                        buy_count += 1
+                    elif pos_type == 'SELL':
+                        sell_count += 1
+                else:
+                    # MT5 object
+                    if getattr(p, 'type', 0) == 0:  # POSITION_TYPE_BUY
+                        buy_count += 1
+                    else:
+                        sell_count += 1
+            
+            total_positions = len(positions)
+            
+            if total_positions == 0:
+                return {'allow': True, 'adjusted_action': action, 'reason': 'No positions', 'lot_multiplier': 1.0}
+            
+            buy_ratio = buy_count / total_positions
+            
+            # 🔥 PORTFOLIO BALANCE LOGIC
+            balance_threshold = self.balance_config.get('max_imbalance_ratio', 0.7)
+            
+            # กรณี BUY เยอะเกิน (> 70%)
+            if buy_ratio > balance_threshold and action == 'BUY':
+                print(f"⚖️ Portfolio imbalanced: BUY {buy_count}, SELL {sell_count} (ratio: {buy_ratio:.2f})")
+                return {
+                    'allow': True, 
+                    'adjusted_action': 'SELL',  # เปลี่ยนเป็น SELL
+                    'reason': f'Balance portfolio: BUY→SELL (ratio {buy_ratio:.2f})', 
+                    'lot_multiplier': 1.3  # เพิ่ม lot เพื่อ balance เร็วขึ้น
+                }
+            
+            # กรณี SELL เยอะเกิน (< 30% = BUY < 30%)
+            elif buy_ratio < (1 - balance_threshold) and action == 'SELL':
+                print(f"⚖️ Portfolio imbalanced: SELL {sell_count}, BUY {buy_count} (BUY ratio: {buy_ratio:.2f})")
+                return {
+                    'allow': True,
+                    'adjusted_action': 'BUY',  # เปลี่ยนเป็น BUY
+                    'reason': f'Balance portfolio: SELL→BUY (BUY ratio {buy_ratio:.2f})',
+                    'lot_multiplier': 1.3  # เพิ่ม lot เพื่อ balance เร็วขึ้น
+                }
+            
+            # กรณีปกติ - เช็คว่าฝั่งนี้น้อยไหม ถ้าน้อยให้เพิ่ม lot
+            lot_multiplier = 1.0
+            if action == 'BUY' and buy_count <= 3:
+                lot_multiplier = 1.2  # เพิ่ม lot เพราะ BUY น้อย
+                print(f"📈 BUY positions low ({buy_count}) → boost lot x{lot_multiplier}")
+            elif action == 'SELL' and sell_count <= 3:
+                lot_multiplier = 1.2  # เพิ่ม lot เพราะ SELL น้อย
+                print(f"📉 SELL positions low ({sell_count}) → boost lot x{lot_multiplier}")
+            elif action == 'BUY' and buy_count >= 10:
+                lot_multiplier = 0.8  # ลด lot เพราะ BUY เยอะ
+                print(f"📈 BUY positions high ({buy_count}) → reduce lot x{lot_multiplier}")
+            elif action == 'SELL' and sell_count >= 10:
+                lot_multiplier = 0.8  # ลด lot เพราะ SELL เยอะ
+                print(f"📉 SELL positions high ({sell_count}) → reduce lot x{lot_multiplier}")
+            
+            return {
+                'allow': True, 
+                'adjusted_action': action, 
+                'reason': f'Normal entry (BUY:{buy_count}, SELL:{sell_count})', 
+                'lot_multiplier': lot_multiplier
+            }
+            
+        except Exception as e:
+            print(f"❌ Portfolio entry check error: {e}")
+            return {'allow': True, 'adjusted_action': action, 'reason': 'Error - allow default', 'lot_multiplier': 1.0}
+
+    def check_exit_priority(self, positions: List, current_price: float = None) -> Dict:
+        """
+        🚪 เช็คว่ามีโอกาสปิดออเดอร์ดีๆ ไหม ควร priority ก่อนเข้าใหม่ - FIXED
+        """
+        try:
+            if not positions or len(positions) < 5:
+                return {'should_wait': False, 'profit_opportunities': 0, 'reason': 'Too few positions'}
+            
+            # หาออเดอร์ที่ใกล้กำไร (> $15) - FIXED
+            profitable_positions = []
+            big_profit_positions = []
+            heavy_loss_positions = []
+            
+            for p in positions:
+                if isinstance(p, dict):
+                    profit = p.get('total_pnl', 0)
+                else:
+                    profit = getattr(p, 'profit', 0)
+                
+                if profit > 15.0:
+                    profitable_positions.append(p)
+                if profit > 40.0:
+                    big_profit_positions.append(p)
+                if profit < -50.0:
+                    heavy_loss_positions.append(p)
+            
+            # 🚪 EXIT PRIORITY LOGIC
+            
+            # กรณี 1: มีกำไรใหญ่หลายออเดอร์ → ควรเก็บก่อน
+            if len(big_profit_positions) >= 2:
+                return {
+                    'should_wait': True,
+                    'profit_opportunities': len(big_profit_positions),
+                    'reason': f'Found {len(big_profit_positions)} big profit orders (>$40) - should harvest first'
+                }
+            
+            # กรณี 2: มีกำไรปานกลางหลายออเดอร์ → ควรพิจารณา
+            if len(profitable_positions) >= 4:
+                return {
+                    'should_wait': True, 
+                    'profit_opportunities': len(profitable_positions),
+                    'reason': f'Found {len(profitable_positions)} profitable orders (>$15) - consider harvesting'
+                }
+            
+            # กรณี 3: มีขาดทุนหนักเยอะ + total portfolio ขาดทุน → ระวัง
+            total_pnl = 0
+            for p in positions:
+                if isinstance(p, dict):
+                    total_pnl += p.get('total_pnl', 0)
+                else:
+                    total_pnl += getattr(p, 'profit', 0)
+            
+            if len(heavy_loss_positions) >= 3 and total_pnl < -100:
+                return {
+                    'should_wait': True,
+                    'profit_opportunities': 0, 
+                    'reason': f'Portfolio unhealthy: {len(heavy_loss_positions)} heavy losses, total P&L: ${total_pnl:.1f}'
+                }
+            
+            # กรณี 4: portfolio มีออเดอร์เยอะเกิน → ควรจัดระเบียบก่อน
+            if len(positions) >= 15:
+                return {
+                    'should_wait': True,
+                    'profit_opportunities': len(profitable_positions),
+                    'reason': f'Too many positions ({len(positions)}) - should organize first'
+                }
+            
+            # ปกติ - อนุญาตเข้าได้
+            return {
+                'should_wait': False, 
+                'profit_opportunities': len(profitable_positions),
+                'reason': f'Normal entry allowed ({len(profitable_positions)} profit opps available)'
+            }
+            
+        except Exception as e:
+            print(f"❌ Exit priority check error: {e}")
+            return {'should_wait': False, 'profit_opportunities': 0, 'reason': 'Error - allow entry'}

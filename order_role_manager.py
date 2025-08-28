@@ -76,6 +76,44 @@ class SmartOrderRoleManager:
     # 🎯 CORE ROLE MANAGEMENT
     # ==========================================
     
+    def _get_position_profit(self, pos) -> float:
+        """
+        💰 ดึง profit จาก position ไม่ว่าจะเป็น dict หรือ object
+        
+        Args:
+            pos: Position data (Dict หรือ MT5 object)
+            
+        Returns:
+            float: Total P&L ของ position
+        """
+        try:
+            if isinstance(pos, dict):
+                return pos.get('total_pnl', 0)
+            else:
+                return getattr(pos, 'profit', 0)
+        except Exception as e:
+            return 0.0
+
+    def _get_position_attribute(self, pos, attr_name: str, default=None):
+        """
+        🔧 ดึง attribute จาก position ไม่ว่าจะเป็น dict หรือ object
+        
+        Args:
+            pos: Position data
+            attr_name: ชื่อ attribute 
+            default: ค่า default
+            
+        Returns:
+            attribute value หรือ default
+        """
+        try:
+            if isinstance(pos, dict):
+                return pos.get(attr_name, default)
+            else:
+                return getattr(pos, attr_name, default)
+        except Exception as e:
+            return default
+
     def analyze_and_assign_roles(self, positions: List[Dict]) -> Dict:
         """
         🧠 วิเคราะห์และจัดหน้าที่ออเดอร์อัจฉริยะ
@@ -233,22 +271,27 @@ class SmartOrderRoleManager:
             print(f"❌ Hedge role assignment error: {e}")
     
     def _assign_sacrifice_roles(self, positions: List[Dict], current_price: float, role_assignments: Dict):
-        """จัดหน้าที่ SACRIFICE - ออเดอร์ที่แย่ที่สุด"""
+        """🎭 มอบหมาย SACRIFICE roles - FIXED"""
         try:
-            # หา positions ที่ขาดทุนหนักและมีโอกาสกลับมาน้อย
             sacrifice_candidates = []
             
             for pos in positions:
                 if pos['id'] in role_assignments:
-                    continue
+                    continue  # ถูก assign แล้ว
                 
-                pnl = pos.get('total_pnl', 0)
-                age_hours = pos.get('age_hours', 0)
-                entry_price = pos.get('price_open', 0)
-                position_type = pos.get('type', '')
+                # ✅ ใช้ helper function
+                pnl = self._get_position_profit(pos)
+                entry_price = self._get_position_attribute(pos, 'price_open', 0)
+                pos_type = self._get_position_attribute(pos, 'type', 'unknown')
+                open_time = self._get_position_attribute(pos, 'time_open', datetime.now())
                 
-                # คำนวณ "hopeless score" - ยิ่งสูงยิ่งหมดหวัง
-                if position_type == 'buy':
+                if isinstance(open_time, str):
+                    continue  # ข้ามถ้าไม่ใช่ datetime
+                
+                age_hours = (datetime.now() - open_time).total_seconds() / 3600
+                
+                # คำนวณ "hopeless score"
+                if pos_type == 'BUY':
                     price_distance = max(0, entry_price - current_price)
                 else:
                     price_distance = max(0, current_price - entry_price)
@@ -271,8 +314,9 @@ class SmartOrderRoleManager:
                 max_sacrifice = min(2, len(sacrifice_candidates))
                 for i in range(max_sacrifice):
                     pos = sacrifice_candidates[i]['position']
-                    role_assignments[pos['id']] = 'SACRIFICE'
-                    print(f"🎭 Assigned SACRIFICE role to position {pos['id']} (Loss: ${sacrifice_candidates[i]['loss']:.2f})")
+                    pos_id = self._get_position_attribute(pos, 'id', 'unknown')
+                    role_assignments[pos_id] = 'SACRIFICE'
+                    print(f"🎭 Assigned SACRIFICE role to position {pos_id} (Loss: ${sacrifice_candidates[i]['loss']:.2f})")
                     
         except Exception as e:
             print(f"❌ Sacrifice role assignment error: {e}")
@@ -315,18 +359,60 @@ class SmartOrderRoleManager:
         except Exception as e:
             print(f"❌ Smart recommendations error: {e}")
             return []
-    
+    def _find_hedge_pair_opportunities(self, positions: List[Dict], role_assignments: Dict, 
+                                 current_price: float) -> List[Dict]:
+        """⚖️ หาโอกาสปิดคู่ hedge - RESTORED"""
+        try:
+            pair_actions = []
+            
+            # หา HG positions
+            hg_positions = [p for p in positions if role_assignments.get(p['id']) == 'HG']
+            other_positions = [p for p in positions if role_assignments.get(p['id']) != 'HG']
+            
+            for hg_pos in hg_positions:
+                hg_pnl = self._get_position_profit(hg_pos)
+                hg_id = self._get_position_attribute(hg_pos, 'id', 'unknown')
+                
+                # หา partner ที่เมื่อปิดคู่แล้ว net positive
+                for partner in other_positions:
+                    partner_pnl = self._get_position_profit(partner)
+                    partner_id = self._get_position_attribute(partner, 'id', 'unknown')
+                    net_result = hg_pnl + partner_pnl
+                    
+                    # ปิดคู่ได้ถ้า net positive หรือขาดทุนน้อยมาก
+                    if net_result >= self.min_net_profit_to_close:
+                        pair_actions.append({
+                            'action_type': 'hedge_pair_close',
+                            'hg_position_id': hg_id,
+                            'partner_position_id': partner_id,
+                            'net_result': net_result,
+                            'hg_profit': hg_pnl,
+                            'partner_profit': partner_pnl,
+                            'priority': 2 if net_result > 20 else 3,
+                            'reason': f"Hedge pair net positive: ${net_result:.2f} (${hg_pnl:.2f} + ${partner_pnl:.2f})"
+                        })
+                        break  # หา partner ได้แล้ว
+            
+            return pair_actions
+            
+        except Exception as e:
+            print(f"❌ Hedge pair opportunities error: {e}")
+            return []
+
     def _find_main_profit_opportunities(self, positions: List[Dict], role_assignments: Dict, 
-                                      current_price: float) -> List[Dict]:
-        """💰 หาโอกาสเก็บกำไร MAIN positions"""
+                                    current_price: float) -> List[Dict]:
+        """💰 หาโอกาสเก็บกำไร MAIN positions - FIXED"""
         try:
             profit_actions = []
             
             main_positions = [p for p in positions if role_assignments.get(p['id']) == 'MAIN']
             
             for pos in main_positions:
-                pnl = pos.get('total_pnl', 0)
-                volume = pos.get('volume', 0)
+                # ✅ ใช้ helper function แทน
+                pnl = self._get_position_profit(pos)
+                volume = self._get_position_attribute(pos, 'volume', 0)
+                pos_id = self._get_position_attribute(pos, 'id', 'unknown')
+                
                 profit_per_lot = pnl / max(volume, 0.01)
                 
                 # เกณฑ์ dynamic ตาม market condition
@@ -337,7 +423,7 @@ class SmartOrderRoleManager:
                     
                     profit_actions.append({
                         'action_type': 'main_profit_harvest',
-                        'position_id': pos['id'],
+                        'position_id': pos_id,
                         'role': 'MAIN',
                         'profit': pnl,
                         'profit_per_lot': profit_per_lot,
@@ -351,83 +437,89 @@ class SmartOrderRoleManager:
             print(f"❌ Main profit opportunities error: {e}")
             return []
     
-    def _find_hedge_pair_opportunities(self, positions: List[Dict], role_assignments: Dict, 
-                                     current_price: float) -> List[Dict]:
-        """⚖️ หาโอกาสปิดคู่ hedge"""
+    def _find_main_profit_opportunities(self, positions: List[Dict], role_assignments: Dict, 
+                                    current_price: float) -> List[Dict]:
+        """💰 หาโอกาสเก็บกำไร MAIN positions - FIXED"""
         try:
-            pair_actions = []
+            profit_actions = []
             
-            # หา HG positions
-            hg_positions = [p for p in positions if role_assignments.get(p['id']) == 'HG']
-            other_positions = [p for p in positions if role_assignments.get(p['id']) != 'HG']
+            main_positions = [p for p in positions if role_assignments.get(p['id']) == 'MAIN']
             
-            for hg_pos in hg_positions:
-                hg_pnl = hg_pos.get('total_pnl', 0)
+            for pos in main_positions:
+                # ✅ ใช้ helper function แทน
+                pnl = self._get_position_profit(pos)
+                volume = self._get_position_attribute(pos, 'volume', 0)
+                pos_id = self._get_position_attribute(pos, 'id', 'unknown')
                 
-                # หา partner ที่เมื่อปิดคู่แล้ว net positive
-                for partner in other_positions:
-                    partner_pnl = partner.get('total_pnl', 0)
-                    net_result = hg_pnl + partner_pnl
+                profit_per_lot = pnl / max(volume, 0.01)
+                
+                # เกณฑ์ dynamic ตาม market condition
+                profit_threshold = self._calculate_dynamic_profit_threshold(pos, current_price)
+                
+                if pnl >= profit_threshold and pnl > self.min_net_profit_to_close:
+                    priority = 1 if profit_per_lot > 150 else 2
                     
-                    # ปิดคู่ได้ถ้า net positive หรือขาดทุนน้อยมาก
-                    if net_result >= self.min_net_profit_to_close:
-                        pair_actions.append({
-                            'action_type': 'hedge_pair_close',
-                            'hg_position_id': hg_pos['id'],
-                            'partner_position_id': partner['id'],
-                            'net_result': net_result,
-                            'hg_role': role_assignments.get(hg_pos['id']),
-                            'partner_role': role_assignments.get(partner['id']),
-                            'priority': 3 if net_result > 20 else 4,
-                            'reason': f"HG pair close: net ${net_result:.2f}"
-                        })
-                        break  # หา partner ได้แล้ว
+                    profit_actions.append({
+                        'action_type': 'main_profit_harvest',
+                        'position_id': pos_id,
+                        'role': 'MAIN',
+                        'profit': pnl,
+                        'profit_per_lot': profit_per_lot,
+                        'priority': priority,
+                        'reason': f"MAIN position profit target reached: ${pnl:.2f} (${profit_per_lot:.0f}/lot)"
+                    })
             
-            return pair_actions
+            return profit_actions
             
         except Exception as e:
-            print(f"❌ Hedge pair opportunities error: {e}")
+            print(f"❌ Main profit opportunities error: {e}")
             return []
     
     def _find_sacrifice_opportunities(self, positions: List[Dict], role_assignments: Dict, 
                                     current_price: float) -> List[Dict]:
-        """🎭 หาโอกาสเสีย SACRIFICE เพื่อช่วย portfolio"""
+        """🎭 หาโอกาสเสีย sacrifice เชิงกลยุทธ์ - FIXED"""
         try:
             sacrifice_actions = []
             
             # หา SACRIFICE positions
             sacrifice_positions = [p for p in positions if role_assignments.get(p['id']) == 'SACRIFICE']
             
-            # คำนวณสุขภาพ portfolio
-            total_pnl = sum(p.get('total_pnl', 0) for p in positions)
+            # หา profitable positions ที่ดี
+            profitable_positions = []
+            for p in positions:
+                pnl = self._get_position_profit(p)
+                if pnl > 30:  # กำไรดี
+                    profitable_positions.append(p)
             
-            # ถ้า portfolio ขาดทุนหนัก ให้พิจารณาเสีย SACRIFICE
-            if total_pnl < -self.emergency_portfolio_loss:
+            # จับคู่ SACRIFICE + Profitable
+            for sacrifice_pos in sacrifice_positions:
+                sacrifice_pnl = self._get_position_profit(sacrifice_pos)
+                sacrifice_id = self._get_position_attribute(sacrifice_pos, 'id', 'unknown')
                 
-                for sacrifice_pos in sacrifice_positions:
-                    sacrifice_loss = sacrifice_pos.get('total_pnl', 0)
+                # หาคู่ profitable ที่ดีที่สุด
+                for profit_pos in profitable_positions:
+                    profit_pnl = self._get_position_profit(profit_pos)
+                    profit_id = self._get_position_attribute(profit_pos, 'id', 'unknown')
                     
-                    # หา profitable positions ที่สามารถ offset การเสีย sacrifice ได้
-                    profitable_positions = [
-                        p for p in positions 
-                        if p.get('total_pnl', 0) > abs(sacrifice_loss) * 0.8
-                        and role_assignments.get(p['id']) in ['MAIN', 'SUPPORT']
-                    ]
+                    net_result = sacrifice_pnl + profit_pnl
+                    sacrifice_loss = abs(sacrifice_pnl) if sacrifice_pnl < 0 else 0
                     
-                    if profitable_positions:
-                        best_profitable = max(profitable_positions, key=lambda x: x.get('total_pnl', 0))
-                        net_result = sacrifice_loss + best_profitable.get('total_pnl', 0)
+                    # ถ้า net positive และ sacrifice loss ไม่เกินที่ยอมรับได้
+                    if (net_result > self.min_net_profit_to_close and 
+                        sacrifice_loss <= self.max_sacrifice_loss):
                         
-                        if net_result >= self.min_net_profit_to_close:
-                            sacrifice_actions.append({
-                                'action_type': 'strategic_sacrifice',
-                                'sacrifice_position_id': sacrifice_pos['id'],
-                                'profitable_position_id': best_profitable['id'],
-                                'net_result': net_result,
-                                'sacrifice_loss': sacrifice_loss,
-                                'priority': 6,
-                                'reason': f"Strategic sacrifice for portfolio health: net ${net_result:.2f}"
-                            })
+                        priority = 2 if net_result > 15 else 3
+                        
+                        sacrifice_actions.append({
+                            'action_type': 'strategic_sacrifice',
+                            'sacrifice_position_id': sacrifice_id,
+                            'profitable_position_id': profit_id,
+                            'sacrifice_loss': sacrifice_loss,
+                            'profit_gain': profit_pnl,
+                            'net_result': net_result,
+                            'priority': priority,
+                            'reason': f"Strategic sacrifice: ${sacrifice_loss:.2f} loss + ${profit_pnl:.2f} profit = ${net_result:.2f} net"
+                        })
             
             return sacrifice_actions
             
@@ -824,27 +916,29 @@ class SmartOrderRoleManager:
             print(f"❌ Close position error: {e}")
             return False
     
+
     def _calculate_dynamic_profit_threshold(self, position: Dict, current_price: float) -> float:
-        """คำนวณเกณฑ์กำไรแบบ dynamic"""
+        """🎯 คำนวณ profit threshold แบบ dynamic - FIXED"""
         try:
-            volume = position.get('volume', 0.01)
-            age_hours = position.get('age_hours', 0)
+            # ✅ ใช้ helper function
+            volume = self._get_position_attribute(position, 'volume', 0.01)
+            age_hours = self._get_position_attribute(position, 'age_hours', 0)
             
-            # เกณฑ์พื้นฐาน
-            base_threshold = volume * self.profit_target_base
+            # Base threshold
+            base_threshold = self.profit_target_base * volume
             
-            # ปรับตามอายุ - ออเดอร์เก่าลดเกณฑ์
-            age_factor = max(0.5, 1.0 - (age_hours * 0.01))  # ลดลง 1% ทุกชั่วโมง
+            # Age factor - ยิ่งเก่า ยิ่งลด threshold
+            age_factor = max(0.5, 1 - (age_hours / 24))
             
-            # ปรับตาม market volatility (ถ้ามี)
-            volatility_factor = 1.0  # TODO: implement volatility detection
+            # Market volatility factor (ถ้ามี)
+            volatility_factor = 1.0  # คงที่ไว้ก่อน
             
             dynamic_threshold = base_threshold * age_factor * volatility_factor
             
             return max(dynamic_threshold, self.min_net_profit_to_close)
             
         except Exception as e:
-            return self.profit_target_base
+            return self.min_net_profit_to_close
     
     def _get_market_context(self, current_price: float, positions: List[Dict]) -> Dict:
         """วิเคราะห์ context ของ market"""
@@ -909,9 +1003,10 @@ class SmartOrderRoleManager:
             # ดึงข้อมูล account
             account_info = self.mt5_connector.get_account_info()
             
-            total_pnl = sum(p.get('total_pnl', 0) for p in positions)
-            losing_positions = [p for p in positions if p.get('total_pnl', 0) < -20]
-            profitable_positions = [p for p in positions if p.get('total_pnl', 0) > 20]
+            # ✅ แก้ใช้ helper function
+            total_pnl = sum(self._get_position_profit(p) for p in positions)
+            losing_positions = [p for p in positions if self._get_position_profit(p) < -20]
+            profitable_positions = [p for p in positions if self._get_position_profit(p) > 20]
             
             # 🆕 MARGIN ANALYSIS
             margin_health = self._analyze_margin_health(account_info, positions)
@@ -932,11 +1027,11 @@ class SmartOrderRoleManager:
             health_score -= losing_ratio * 0.2
             
             # 3. Margin Health (30% weight) 🆕
-            margin_penalty = (1.0 - margin_health['health_ratio']) * 0.3
+            margin_penalty = (1.0 - margin_health.get('health_ratio', 0.5)) * 0.3
             health_score -= margin_penalty
             
             # 4. Correlation Risk (10% weight) 🆕
-            correlation_penalty = correlation_risk['risk_score'] * 0.1
+            correlation_penalty = correlation_risk.get('risk_score', 0) * 0.1
             health_score -= correlation_penalty
             
             # Bonus for profitable positions
@@ -973,7 +1068,7 @@ class SmartOrderRoleManager:
             
         except Exception as e:
             return {'error': str(e), 'health_score': 0.5, 'status': 'unknown'}
-               
+                   
     def simulate_close_impact(self, positions_to_close: List[int], all_positions: List[Dict]) -> Dict:
         """
         🎮 จำลองผลกระทบของการปิดออเดอร์
@@ -1386,71 +1481,37 @@ class SmartOrderRoleManager:
         except Exception as e:
             return {'risk_score': 0.5, 'error': str(e)}
     
-    def _identify_risk_factors(self, positions: List[Dict], account_info: Dict) -> List[Dict]:
-        """⚠️ ระบุ risk factors ของ portfolio"""
+    def _identify_risk_factors(self, positions: List[Dict], account_info: Dict) -> List[str]:
+        """🚨 ระบุ risk factors - FIXED"""
         try:
             risk_factors = []
             
-            total_pnl = sum(p.get('total_pnl', 0) for p in positions)
-            total_volume = sum(p.get('volume', 0) for p in positions)
+            # ✅ ใช้ helper function อ่าน profit
+            total_pnl = sum(self._get_position_profit(p) for p in positions)
+            heavy_losers = [p for p in positions if self._get_position_profit(p) < -50]
             
-            # 1. High Portfolio Loss
+            if len(heavy_losers) >= 3:
+                risk_factors.append(f"{len(heavy_losers)} positions with heavy losses (>$50)")
+            
             if total_pnl < -200:
-                risk_factors.append({
-                    'type': 'high_portfolio_loss',
-                    'severity': 'high' if total_pnl < -500 else 'medium',
-                    'value': total_pnl,
-                    'description': f"Portfolio loss at ${total_pnl:.0f}",
-                    'recommendation': "Consider closing profitable positions to offset losses"
-                })
+                risk_factors.append(f"Large portfolio loss: ${total_pnl:.2f}")
             
-            # 2. Excessive Volume
-            balance = account_info.get('balance', 0) if account_info else 0
-            if balance > 0 and total_volume > balance / 200:  # Volume > 0.5% of balance per $100
-                risk_factors.append({
-                    'type': 'excessive_volume',
-                    'severity': 'medium',
-                    'value': total_volume,
-                    'description': f"High volume exposure: {total_volume:.2f} lots",
-                    'recommendation': "Consider reducing position sizes"
-                })
+            # Position concentration risk
+            buy_count = len([p for p in positions if self._get_position_attribute(p, 'type') == 'BUY'])
+            sell_count = len(positions) - buy_count
             
-            # 3. Too Many Losing Positions
-            losing_positions = [p for p in positions if p.get('total_pnl', 0) < -30]
-            if len(losing_positions) > 5:
-                risk_factors.append({
-                    'type': 'many_losing_positions',
-                    'severity': 'medium',
-                    'value': len(losing_positions),
-                    'description': f"{len(losing_positions)} positions with significant losses",
-                    'recommendation': "Use hedge pairs or strategic closing"
-                })
-            
-            # 4. Low Margin Level
-            if account_info:
-                margin = account_info.get('margin', 0)
-                equity = account_info.get('equity', 0)
-                
-                if margin > 0 and equity > 0:
-                    margin_level = (equity / margin) * 100
-                    
-                    if margin_level < 300:
-                        severity = 'high' if margin_level < 200 else 'medium'
-                        risk_factors.append({
-                            'type': 'low_margin_level',
-                            'severity': severity,
-                            'value': margin_level,
-                            'description': f"Margin level at {margin_level:.1f}%",
-                            'recommendation': "Close positions to free margin or add funds"
-                        })
+            if buy_count > 0 and sell_count > 0:
+                ratio = max(buy_count, sell_count) / (buy_count + sell_count)
+                if ratio > 0.8:
+                    risk_factors.append(f"High directional concentration: {ratio:.1%}")
             
             return risk_factors
             
         except Exception as e:
-            return [{'type': 'analysis_error', 'error': str(e)}]
-    
+            return [f"Risk analysis error: {str(e)}"]
+
     def _find_optimization_opportunities(self, positions: List[Dict], account_info: Dict) -> List[Dict]:
-        """🎯 หาโอกาส optimize portfolio"""
+        """🎯 หาโอกาส optimize portfolio - FIXED"""
         try:
             opportunities = []
             
@@ -1462,8 +1523,9 @@ class SmartOrderRoleManager:
                     inefficient_positions = []
                     
                     for pos in positions:
-                        volume = pos.get('volume', 0)
-                        pnl = pos.get('total_pnl', 0)
+                        # ✅ ใช้ helper function
+                        volume = self._get_position_attribute(pos, 'volume', 0)
+                        pnl = self._get_position_profit(pos)
                         
                         if volume > 0.05:  # Volume สูง
                             estimated_margin = volume * 50  # Rough estimate
@@ -1488,11 +1550,12 @@ class SmartOrderRoleManager:
                         })
             
             # 2. Portfolio Rebalancing
-            buy_positions = [p for p in positions if p.get('type') == 'buy']
-            sell_positions = [p for p in positions if p.get('type') == 'sell']
+            buy_positions = [p for p in positions if self._get_position_attribute(p, 'type') == 'BUY']
+            sell_positions = [p for p in positions if self._get_position_attribute(p, 'type') == 'SELL']
             
-            buy_volume = sum(p.get('volume', 0) for p in buy_positions)
-            sell_volume = sum(p.get('volume', 0) for p in sell_positions)
+            # ✅ ใช้ helper function
+            buy_volume = sum(self._get_position_attribute(p, 'volume', 0) for p in buy_positions)
+            sell_volume = sum(self._get_position_attribute(p, 'volume', 0) for p in sell_positions)
             
             if buy_volume > 0 and sell_volume > 0:
                 total_volume = buy_volume + sell_volume
@@ -1514,11 +1577,11 @@ class SmartOrderRoleManager:
             # 3. Profit Crystallization
             highly_profitable_positions = [
                 p for p in positions 
-                if p.get('total_pnl', 0) > 100 and p.get('age_hours', 0) > 6
+                if self._get_position_profit(p) > 100 and self._get_position_attribute(p, 'age_hours', 0) > 6
             ]
             
             if highly_profitable_positions:
-                total_profit_available = sum(p.get('total_pnl', 0) for p in highly_profitable_positions)
+                total_profit_available = sum(self._get_position_profit(p) for p in highly_profitable_positions)
                 
                 opportunities.append({
                     'type': 'profit_crystallization',

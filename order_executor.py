@@ -739,3 +739,80 @@ class OrderExecutor:
         except Exception as e:
             print(f"❌ Clear order locks error: {e}")
             return False
+
+    def calculate_portfolio_aware_lot(self, base_lot: float, signal_data: Dict, 
+                                    positions: List, lot_multiplier: float = 1.0) -> float:
+        """
+        📊 คำนวณ lot size ที่รู้เรื่อง portfolio balance - FIXED
+        """
+        try:
+            action = signal_data.get('action')
+            
+            if action not in ['BUY', 'SELL'] or not positions:
+                return max(base_lot, self.min_lot)
+            
+            # วิเคราะห์ portfolio volume balance - FIXED
+            buy_volume = 0
+            sell_volume = 0
+            
+            for p in positions:
+                volume = p.get('volume', 0) if isinstance(p, dict) else getattr(p, 'volume', 0)
+                pos_type = p.get('type') if isinstance(p, dict) else getattr(p, 'type', 0)
+                
+                if pos_type == 0:  # BUY
+                    buy_volume += volume
+                elif pos_type == 1:  # SELL  
+                    sell_volume += volume
+            
+            total_volume = buy_volume + sell_volume
+            
+            if total_volume == 0:
+                return max(base_lot, self.min_lot)
+            
+            buy_volume_ratio = buy_volume / total_volume
+            
+            # เริ่มจาก base lot
+            adjusted_lot = base_lot
+            
+            # 1. ใช้ lot_multiplier จาก portfolio analysis
+            adjusted_lot *= lot_multiplier
+            
+            # 2. ปรับเพิ่มตาม volume imbalance
+            volume_threshold = 0.65  # 65% threshold
+            
+            if action == 'BUY':
+                if buy_volume_ratio < (1 - volume_threshold):  # BUY volume น้อย (< 35%)
+                    volume_boost = 1.4
+                    adjusted_lot *= volume_boost
+                    print(f"📈 BUY volume low ({buy_volume_ratio:.2f}) → boost lot x{volume_boost}")
+                elif buy_volume_ratio > volume_threshold:  # BUY volume เยอะ (> 65%)
+                    volume_reduce = 0.7
+                    adjusted_lot *= volume_reduce  
+                    print(f"📈 BUY volume high ({buy_volume_ratio:.2f}) → reduce lot x{volume_reduce}")
+            
+            elif action == 'SELL':
+                sell_volume_ratio = sell_volume / total_volume
+                if sell_volume_ratio < (1 - volume_threshold):  # SELL volume น้อย (< 35%)
+                    volume_boost = 1.4
+                    adjusted_lot *= volume_boost
+                    print(f"📉 SELL volume low ({sell_volume_ratio:.2f}) → boost lot x{volume_boost}")
+                elif sell_volume_ratio > volume_threshold:  # SELL volume เยอะ (> 65%)
+                    volume_reduce = 0.7
+                    adjusted_lot *= volume_reduce
+                    print(f"📉 SELL volume high ({sell_volume_ratio:.2f}) → reduce lot x{volume_reduce}")
+            
+            # 3. จำกัดใน range ที่กำหนด
+            final_lot = max(self.min_lot, min(adjusted_lot, self.max_lot))
+            
+            # 4. ปรับให้เป็นทศนิยมที่ MT5 รับได้
+            final_lot = round(final_lot, 2)
+            
+            if final_lot != base_lot:
+                print(f"💡 Portfolio-aware lot sizing: {base_lot:.3f} → {final_lot:.3f}")
+                print(f"   Reason: {action} volume ratio: {buy_volume_ratio if action == 'BUY' else sell_volume_ratio:.2f}")
+            
+            return final_lot
+            
+        except Exception as e:
+            print(f"❌ Portfolio-aware lot calculation error: {e}")
+            return max(base_lot, self.min_lot)

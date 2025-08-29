@@ -659,12 +659,12 @@ class EnhancedPureCandlestickGUI:
             self.is_trading = False
     
     def enhanced_trading_loop(self):
-        """🔄 Enhanced Trading Loop - Smart Role Management + Portfolio-Aware Entry + DEBUG"""
-        self.log("🔄 Enhanced trading loop with Smart Role Management + Portfolio Intelligence + DEBUG started")
+        """🔄 Enhanced Trading Loop - COMPLETE with DEBUG LOGS"""
+        self.log("🔄 Enhanced trading loop with COMPLETE Order Execution Integration + DEBUG started")
         
         while self.is_trading:
             try:
-                # 1. วิเคราะห์แท่งเทียน (เดิม)
+                # 1. วิเคราะห์แท่งเทียน
                 if self.candlestick_analyzer:
                     candlestick_data = self.candlestick_analyzer.get_current_analysis()
                     
@@ -674,13 +674,25 @@ class EnhancedPureCandlestickGUI:
                     
                     self.update_candlestick_display_from_data(candlestick_data)
                     
-                    # 2. สร้าง signal (เดิม)
+                    # 2. สร้าง signal พร้อม DEBUG
                     if self.signal_generator:
                         signal_data = self.signal_generator.generate_signal(candlestick_data)
+                        
+                        # 🔍 DEBUG: แสดงข้อมูล signal ที่ได้
+                        if signal_data:
+                            action = signal_data.get('action', 'UNKNOWN')
+                            strength = signal_data.get('strength', 0)
+                            
+                            self.log(f"🎯 SIGNAL GENERATED: {action}")
+                            self.log(f"   💪 Strength: {strength:.3f}")
+                            self.log(f"   🏷️ Pattern: {signal_data.get('pattern', 'unknown')}")
+                            self.log(f"   ✅ Filters passed: {signal_data.get('filters_passed', 'unknown')}")
+                            self.log(f"   📊 Lot multiplier: {signal_data.get('recommended_lot_multiplier', 1.0):.2f}x")
                         
                         if signal_data and signal_data.get('action') != 'WAIT':
                             self.update_signal_display(signal_data)
                             
+                            # 📝 Record signal ใน performance tracker
                             if self.performance_tracker:
                                 self.performance_tracker.record_signal(signal_data)
                             
@@ -688,6 +700,19 @@ class EnhancedPureCandlestickGUI:
                             positions = []
                             if self.position_monitor:
                                 positions = self.position_monitor.get_all_positions()
+                            
+                            # 🔍 DEBUG: แสดงสถานะ portfolio
+                            self.log(f"📊 PORTFOLIO STATUS:")
+                            self.log(f"   Total positions: {len(positions)}")
+                            if positions:
+                                buy_count = len([p for p in positions if p.get('type') == 'buy'])
+                                sell_count = len([p for p in positions if p.get('type') == 'sell'])
+                                total_pnl = sum(p.get('total_pnl', 0) for p in positions)
+                                profitable_count = len([p for p in positions if p.get('total_pnl', 0) > 15])
+                                
+                                self.log(f"   BUY: {buy_count}, SELL: {sell_count}")
+                                self.log(f"   Total P&L: ${total_pnl:.2f}")
+                                self.log(f"   Profitable >$15: {profitable_count}")
                             
                             # ประเมินว่าควร entry หรือ exit ก่อน
                             priority_decision = self._evaluate_entry_vs_exit_priority(
@@ -698,281 +723,224 @@ class EnhancedPureCandlestickGUI:
                             decision_action = priority_decision.get('action', 'entry')
                             decision_reason = priority_decision.get('reason', '')
                             
+                            self.log(f"🧠 PRIORITY DECISION: {decision_action}")
+                            self.log(f"   Reason: {decision_reason}")
+                            
                             if decision_action == 'exit_first':
                                 self.log(f"🚪 EXIT PRIORITY: {decision_reason}")
-                                # รอให้ role_manager execute recommendations ก่อน - ข้าม entry รอบนี้
+                                # รอให้ role_manager execute recommendations ก่อน
                                 
                             elif decision_action == 'wait':
-                                self.log(f"⏳ WAIT MODE: {decision_reason}")
-                                # ข้าม entry เพราะ portfolio ไม่พร้อม
+                                self.log(f"⏸️ WAIT DECISION: {decision_reason}")
                                 
                             elif decision_action == 'entry':
-                                self.log(f"✅ ENTRY ALLOWED: {decision_reason}")
+                                # =====================================================
+                                # 🚀 ACTUAL ORDER EXECUTION
+                                # =====================================================
                                 
-                                # เช็ค portfolio balance และปรับ signal
-                                if hasattr(self.signal_generator, 'should_allow_entry'):
-                                    entry_analysis = self.signal_generator.should_allow_entry(signal_data, positions)
-                                    
-                                    # ปรับ signal ตาม portfolio analysis
-                                    original_action = signal_data.get('action')
-                                    adjusted_action = entry_analysis.get('adjusted_action', original_action)
-                                    lot_multiplier = entry_analysis.get('lot_multiplier', 1.0)
-                                    
-                                    if adjusted_action != original_action:
-                                        self.log(f"🔄 DIRECTION OVERRIDE: {original_action} → {adjusted_action}")
-                                        self.log(f"   Reason: {entry_analysis.get('reason', 'Portfolio balance')}")
-                                        signal_data['action'] = adjusted_action
-                                    
-                                    # คำนวณ lot ที่ portfolio-aware
-                                    if hasattr(self.order_executor, 'calculate_portfolio_aware_lot'):
-                                        original_lot = signal_data.get('dynamic_lot_size', 0.03)
-                                        portfolio_aware_lot = self.order_executor.calculate_portfolio_aware_lot(
-                                            original_lot, signal_data, positions, lot_multiplier
-                                        )
-                                        signal_data['dynamic_lot_size'] = portfolio_aware_lot
-                                        if portfolio_aware_lot != original_lot:
-                                            self.log(f"💡 Portfolio-aware lot: {original_lot:.3f} → {portfolio_aware_lot:.3f}")
+                                self.log(f"🎯 ENTRY DECISION: {decision_reason}")
                                 
-                                # 4. ส่งออเดอร์แบบ portfolio-aware
-                                if self.order_executor:
-                                    execution_result = self.order_executor.execute_signal(signal_data)
+                                # ✅ 4. Risk Management Check พร้อม DEBUG
+                                if self.risk_manager:
+                                    risk_status = self.risk_manager.check_risk_levels()
                                     
-                                    if execution_result:
-                                        action_display = signal_data.get('action')
-                                        success = execution_result.get('success', False)
-                                        self.log(f"📝 Portfolio-aware order executed: {action_display} - {success}")
+                                    # 🔍 DEBUG: แสดงสถานะ risk management
+                                    can_trade = risk_status.get('can_trade', False)
+                                    risk_level = risk_status.get('overall_risk', 'unknown')
+                                    
+                                    self.log(f"🛡️ RISK CHECK: {risk_level} risk")
+                                    self.log(f"   Can trade: {can_trade}")
+                                    
+                                    if not can_trade:
+                                        restrictions = risk_status.get('restrictions', [])
+                                        warnings = risk_status.get('warnings', [])
                                         
-                                        if self.performance_tracker:
-                                            self.performance_tracker.record_execution(execution_result, signal_data)
+                                        self.log(f"   🚫 BLOCKED: {', '.join(restrictions)}")
+                                        if warnings:
+                                            self.log(f"   ⚠️ Warnings: {', '.join(warnings)}")
+                                        continue  # ข้าม entry ครั้งนี้
+                                    
+                                    if risk_status.get('emergency_stop', False):
+                                        self.log("🚨 EMERGENCY STOP activated!")
+                                        self.stop_trading()
+                                        break
+                                else:
+                                    self.log("⚠️ Risk manager not available - proceeding anyway")
+                                
+                                # ✅ 5. EXECUTE THE SIGNAL! พร้อม DEBUG
+                                if self.order_executor:
+                                    if self.order_executor.is_ready():
+                                        
+                                        self.log(f"⚡ ORDER EXECUTOR READY - EXECUTING {signal_data.get('action')} ORDER...")
+                                        self.log(f"   📊 Signal strength: {signal_data.get('strength', 0):.3f}")
+                                        self.log(f"   🎲 Recommended lot: {signal_data.get('recommended_lot_multiplier', 1.0):.2f}x")
+                                        
+                                        # ส่งออเดอร์!
+                                        execution_result = self.order_executor.execute_signal(signal_data)
+                                        
+                                        # 🔍 DEBUG: แสดงผล execution
+                                        self.log(f"📤 EXECUTION RESULT:")
+                                        if execution_result:
+                                            success = execution_result.get('success', False)
+                                            
+                                            if success:
+                                                # ✅ สำเร็จ!
+                                                order_id = execution_result.get('order_id', 'unknown')
+                                                deal_id = execution_result.get('deal_id', 'unknown')
+                                                price = execution_result.get('price', 0)
+                                                volume = execution_result.get('volume', 0)
+                                                slippage = execution_result.get('slippage_points', 0)
+                                                exec_time = execution_result.get('execution_time_ms', 0)
+                                                
+                                                self.log(f"   ✅ ORDER EXECUTED SUCCESSFULLY!")
+                                                self.log(f"   🆔 Order ID: {order_id}")
+                                                self.log(f"   🆔 Deal ID: {deal_id}")
+                                                self.log(f"   💰 Price: ${price:.5f}")
+                                                self.log(f"   📊 Volume: {volume} lots")
+                                                self.log(f"   📈 Slippage: {slippage:.1f} points")
+                                                self.log(f"   ⚡ Execution time: {exec_time:.1f}ms")
+                                                
+                                                # 📝 Record execution ใน performance tracker
+                                                if self.performance_tracker:
+                                                    self.performance_tracker.record_execution(execution_result, signal_data)
+                                                    self.log(f"   📝 Execution recorded in performance tracker")
+                                                
+                                            else:
+                                                # ❌ ไม่สำเร็จ
+                                                error_msg = execution_result.get('error', 'Unknown error')
+                                                blocked = execution_result.get('blocked', False)
+                                                
+                                                self.log(f"   ❌ ORDER EXECUTION FAILED!")
+                                                self.log(f"   ❌ Error: {error_msg}")
+                                                
+                                                if blocked:
+                                                    self.log(f"   🚫 Reason: Order blocked (candle lock)")
+                                                
+                                        else:
+                                            self.log(f"   ❌ ORDER EXECUTOR returned None/Empty result")
+                                            
+                                    else:
+                                        # Order executor ไม่พร้อม
+                                        self.log(f"❌ ORDER EXECUTOR NOT READY!")
+                                        self.log(f"   📊 Executor exists: {self.order_executor is not None}")
+                                        self.log(f"   🔗 MT5 connected: {self.mt5_connector.is_connected if self.mt5_connector else False}")
+                                        self.log(f"   📋 Symbol: {getattr(self.order_executor, 'symbol', 'unknown')}")
+                                        
+                                        # เช็ค account permissions
+                                        if self.mt5_connector and self.mt5_connector.is_connected:
+                                            account_info = self.mt5_connector.get_account_info()
+                                            if account_info:
+                                                trade_allowed = account_info.get('trade_allowed', False)
+                                                self.log(f"   🎛️ Trade allowed: {trade_allowed}")
+                                                self.log(f"   💰 Account balance: ${account_info.get('balance', 0):.2f}")
+                                        
+                                else:
+                                    self.log(f"❌ ORDER EXECUTOR MISSING!")
+                                    self.log(f"   Executor initialized: {self.order_executor is not None}")
+                        else:
+                            # ไม่มี signal หรือเป็น WAIT
+                            if signal_data:
+                                self.log(f"⏸️ Signal action: {signal_data.get('action', 'None')} - no execution needed")
                 
-                # 🆕 5. Smart Position Management
-                if self.position_monitor:
+                # 6. Enhanced Position Monitoring & Role Management
+                if self.position_monitor and self.role_manager:
                     positions = self.position_monitor.get_all_positions()
                     
-                    # 🔍 DEBUG: ตรวจสอบ position data structure
                     if positions:
-                        self.log(f"🔍 POSITION DATA DEBUG:")
-                        for i, pos in enumerate(positions[:3]):  # ดู 3 positions แรก
-                            # เช็คว่า pos เป็น Dict หรือ Object
-                            if isinstance(pos, dict):
-                                # Position เป็น Dict (จาก PositionMonitor)
-                                profit = pos.get('profit', 0)
-                                total_pnl = pos.get('total_pnl', 0)
-                                pos_type = pos.get('type', 'unknown')
-                                ticket = pos.get('id', 'unknown')
-                                volume = pos.get('volume', 0)
-                                
-                                self.log(f"   Position {i+1} ({pos_type} {ticket}): profit=${profit:.2f}, total_pnl=${total_pnl:.2f}, vol={volume:.2f}")
-                            else:
-                                # Position เป็น Object (raw MT5)
-                                profit_attrs = []
-                                for attr in ['profit', 'total_pnl', 'unrealized_profit', 'pnl']:
-                                    try:
-                                        value = getattr(pos, attr, None)
-                                        if value is not None:
-                                            profit_attrs.append(f"{attr}=${value:.2f}")
-                                    except:
-                                        pass
-                                
-                                pos_type = 'BUY' if getattr(pos, 'type', 0) == 0 else 'SELL'
-                                ticket = getattr(pos, 'ticket', 'unknown')
-                                self.log(f"   Position {i+1} ({pos_type} {ticket}): {', '.join(profit_attrs) if profit_attrs else 'No profit attributes found'}")
-                        
-                        # 🔍 เช็ค profitable positions ถูกต้อง
-                        profitable_positions = []
-                        for pos in positions:
-                            if isinstance(pos, dict):
-                                profit = pos.get('total_pnl', 0)  # ใช้ total_pnl สำหรับ Dict
-                                ticket = pos.get('id', 'unknown')
-                                pos_type = pos.get('type', 'unknown')
-                            else:
-                                profit = getattr(pos, 'profit', 0)  # ใช้ profit สำหรับ Object
-                                ticket = getattr(pos, 'ticket', 'unknown')
-                                pos_type = 'BUY' if getattr(pos, 'type', 0) == 0 else 'SELL'
-                            
-                            if profit > 15:
-                                profitable_positions.append(f"{pos_type} {ticket}: ${profit:.2f}")
-                        
-                        if profitable_positions:
-                            self.log(f"🔍 CORRECTED PROFIT CHECK:")
-                            for item in profitable_positions[:5]:
-                                self.log(f"   💰 {item}")
-                            if len(profitable_positions) > 5:
-                                self.log(f"   ... and {len(profitable_positions)-5} more profitable positions")
-                        else:
-                            self.log(f"🔍 CORRECTED PROFIT CHECK: No positions with profit > $15 found")
-
-                    self.update_enhanced_positions_display(positions)
-                    
-                    # 🧠 Smart Role Management + DEBUG
-                    if self.role_manager and positions:
-                        # 🔍 DEBUG: Portfolio overview ก่อน analysis
-                        buy_count = len([p for p in positions if getattr(p, 'type', 0) == 0])
-                        sell_count = len([p for p in positions if getattr(p, 'type', 0) == 1])
-                        total_pnl = sum(getattr(p, 'profit', 0) for p in positions)
-                        profitable_count = len([p for p in positions if getattr(p, 'profit', 0) > 15])
-                        big_profit_count = len([p for p in positions if getattr(p, 'profit', 0) > 40])
-                        
-                        self.log(f"🔍 PRE-ANALYSIS PORTFOLIO:")
-                        self.log(f"   Total: {len(positions)} positions (BUY: {buy_count}, SELL: {sell_count})")
-                        self.log(f"   P&L: ${total_pnl:.2f}")
-                        self.log(f"   Profitable >$15: {profitable_count}, >$40: {big_profit_count}")
-                        
+                        # อัพเดท role assignments
                         role_analysis = self.role_manager.analyze_and_assign_roles(positions)
                         recommendations = role_analysis.get('recommendations', [])
                         
+                        # 🔍 DEBUG: แสดงข้อมูล recommendations
                         if recommendations:
-                            self.log(f"🧠 Smart Role Analysis: {len(recommendations)} recommendations found")
-                            
-                            # 🔍 DEBUG CLOSE ANALYSIS - ใหม่
-                            self.log(f"🔍 DEBUG CLOSE ANALYSIS:")
-                            self.log(f"   Total recommendations: {len(recommendations)}")
-                            
-                            # แสดงรายละเอียดแต่ละ recommendation
-                            for i, rec in enumerate(recommendations[:8]):  # แสดง 8 อันแรก
+                            self.log(f"🎯 SMART RECOMMENDATIONS: {len(recommendations)} found")
+                            for i, rec in enumerate(recommendations[:3]):  # แสดง 3 อันแรก
                                 action_type = rec.get('action_type', 'unknown')
                                 priority = rec.get('priority', 99)
-                                profit = rec.get('profit', 0)
-                                position_id = rec.get('position_id', rec.get('hg_position_id', rec.get('sacrifice_position_id', 'N/A')))
+                                expected_result = rec.get('net_result', rec.get('profit', 0))
                                 
-                                self.log(f"   {i+1}. {action_type} (Priority: {priority}, Profit: ${profit:.2f}, ID: {position_id})")
-                                
-                                # เช็คว่าจะถูก execute ไหม
-                                will_be_in_top2 = i < 2
-                                is_high_priority = priority <= 3
-                                is_profit_action = 'profit' in action_type.lower()
-                                
-                                will_execute = will_be_in_top2 and (is_high_priority or is_profit_action)
-                                reason = []
-                                if not will_be_in_top2:
-                                    reason.append("Not in top 2")
-                                if not is_high_priority and not is_profit_action:
-                                    reason.append(f"Priority {priority} > 3 and not profit action")
-                                
-                                status = "YES" if will_execute else f"NO ({', '.join(reason)})"
-                                self.log(f"      → Will execute: {status}")
-                            
-                            # 🔍 DEBUG: เช็ค profitable positions ด้วยตาเปล่า
-                            manual_profit_check = []
-                            for pos in positions:
-                                profit = getattr(pos, 'profit', 0)
-                                if profit > 20:  # กำไร > $20
-                                    pos_id = getattr(pos, 'ticket', getattr(pos, 'identifier', 'unknown'))
-                                    pos_type = 'BUY' if getattr(pos, 'type', 0) == 0 else 'SELL'
-                                    manual_profit_check.append(f"{pos_type} {pos_id}: ${profit:.2f}")
-                            
-                            if manual_profit_check:
-                                self.log(f"🔍 MANUAL PROFIT CHECK:")
-                                for item in manual_profit_check[:5]:  # แสดง 5 อันแรก
-                                    self.log(f"   💰 {item}")
-                                if len(manual_profit_check) > 5:
-                                    self.log(f"   ... and {len(manual_profit_check)-5} more profitable positions")
-                            else:
-                                self.log(f"🔍 MANUAL PROFIT CHECK: No positions with profit > $20 found")
-                            
-                            self.update_recommendations_display_from_data(recommendations)
-                            
-                            # Execute top smart recommendations with DEBUG
-                            executed_count = 0
-                            for i, rec in enumerate(recommendations[:2]):  # ทำแค่ 2 actions ต่อ cycle
-                                action_type = rec.get('action_type', 'unknown')
-                                priority = rec.get('priority', 99)
-                                
-                                self.log(f"🔍 EXECUTING RECOMMENDATION #{i+1}:")
-                                self.log(f"   Action: {action_type}")
-                                self.log(f"   Priority: {priority}")
-                                
-                                # จำลองผลกระทบสำหรับ actions ที่เสี่ยง
-                                if rec.get('action_type') in ['hedge_pair_close', 'strategic_sacrifice', 'emergency_portfolio_protection']:
-                                    self.log(f"   → Requires impact simulation")
-                                    
-                                    positions_to_close = self._extract_positions_from_recommendation(rec)
-                                    self.log(f"   → Positions to close: {positions_to_close}")
-                                    
-                                    if positions_to_close:
-                                        self.log(f"   → Running impact simulation...")
-                                        impact = self.role_manager.simulate_close_impact(positions_to_close, positions)
-                                        
-                                        # เช็คว่าควรทำไหม
-                                        recommendation_level = impact.get('overall_impact', {}).get('recommendation', 'NOT_RECOMMENDED')
-                                        self.log(f"   → Simulation result: {recommendation_level}")
-                                        
-                                        if recommendation_level in ['HIGHLY_RECOMMENDED', 'RECOMMENDED']:
-                                            self.log(f"   → ✅ EXECUTING: {action_type}")
-                                            result = self.role_manager.execute_smart_recommendation(rec)
-                                            
-                                            if result.get('success'):
-                                                executed_count += 1
-                                                self.log(f"✅ Smart action executed: {action_type}")
-                                                
-                                                # แสดงผลกระทบที่เกิดขึ้น
-                                                profit = impact.get('profit_from_closing', 0)
-                                                health_improvement = impact.get('projected_health_score', 0) - impact.get('current_health_score', 0)
-                                                self.log(f"   📊 Impact: ${profit:.2f} profit, +{health_improvement:.3f} health score")
-                                            else:
-                                                self.log(f"❌ Smart action FAILED: {action_type}")
-                                                self.log(f"   Error: {result.get('error', 'Unknown error')}")
-                                        else:
-                                            self.log(f"   → ❌ SKIPPED: {action_type} - {recommendation_level}")
-                                            if recommendation_level == 'NOT_RECOMMENDED':
-                                                impact_details = impact.get('overall_impact', {})
-                                                self.log(f"      Reason: Score {impact_details.get('score', 0):.2f}, Health {impact_details.get('health_impact', 0):.2f}")
-                                    else:
-                                        self.log(f"   → ❌ NO POSITIONS TO CLOSE for {action_type}")
-                                
-                                # สำหรับ actions ที่ไม่เสี่ยง (main_profit_harvest, role_rebalance)
-                                elif rec.get('action_type') in ['main_profit_harvest', 'role_rebalance']:
-                                    self.log(f"   → Direct execution (no simulation needed)")
-                                    self.log(f"   → ✅ EXECUTING: {action_type}")
-                                    
-                                    result = self.role_manager.execute_smart_recommendation(rec)
-                                    if result.get('success'):
-                                        executed_count += 1
-                                        profit = rec.get('profit', 0)
-                                        self.log(f"✅ Smart action executed: {action_type} (${profit:.2f})")
-                                    else:
-                                        self.log(f"❌ Smart action FAILED: {action_type}")
-                                        self.log(f"   Error: {result.get('error', 'Unknown error')}")
-                                
-                                else:
-                                    self.log(f"   → ❓ UNKNOWN ACTION TYPE: {action_type}")
-                            
-                            # สรุปการ execute ใน cycle นี้
-                            self.log(f"🔍 EXECUTION SUMMARY: {executed_count}/{min(2, len(recommendations))} actions executed this cycle")
-                            
-                            if executed_count == 0:
-                                self.log(f"⚠️ WARNING: No actions executed despite {len(recommendations)} recommendations!")
-                                
-                                # เช็คเหตุผลที่ไม่ execute
-                                top_2_recs = recommendations[:2]
-                                for i, rec in enumerate(top_2_recs):
-                                    action_type = rec.get('action_type')
-                                    priority = rec.get('priority', 99)
-                                    
-                                    if action_type in ['hedge_pair_close', 'strategic_sacrifice', 'emergency_portfolio_protection']:
-                                        self.log(f"   Rec #{i+1} ({action_type}) might be blocked by simulation")
-                                    elif priority > 3 and 'profit' not in action_type.lower():
-                                        self.log(f"   Rec #{i+1} ({action_type}) blocked by low priority: {priority}")
-                                    else:
-                                        self.log(f"   Rec #{i+1} ({action_type}) should execute - check for errors")
+                                self.log(f"   {i+1}. {action_type} (P:{priority}) → ${expected_result:.2f}")
                         
-                        else:
-                            # ไม่มี smart recommendations - แสดงสถานะเบื้องต้น
-                            if len(positions) > 0:
-                                total_pnl = sum(getattr(p, 'profit', 0) for p in positions)
-                                self.log(f"📊 Portfolio: {len(positions)} positions, ${total_pnl:.2f} P&L - No actions needed")
+                        # Execute top priority recommendation
+                        if recommendations:
+                            top_recommendation = recommendations[0]
+                            priority = top_recommendation.get('priority', 99)
+                            
+                            # Execute แค่ priority สูง (1-3) เพื่อไม่รบกวน entry
+                            if priority <= 3:
+                                action_type = top_recommendation.get('action_type', 'unknown')
+                                self.log(f"⚡ EXECUTING TOP RECOMMENDATION: {action_type} (Priority: {priority})")
+                                
+                                execution_result = self.role_manager.execute_smart_recommendation(top_recommendation)
+                                
+                                if execution_result.get('success'):
+                                    self.log(f"   ✅ Smart action completed: {action_type}")
+                                    
+                                    # แสดงรายละเอียดผลลัพธ์
+                                    details = execution_result.get('execution_details', {})
+                                    if details:
+                                        for key, value in details.items():
+                                            if 'profit' in key or 'result' in key:
+                                                self.log(f"   💰 {key}: ${value:.2f}" if isinstance(value, (int, float)) else f"   📊 {key}: {value}")
+                                else:
+                                    error_msg = execution_result.get('error', 'Unknown error')
+                                    self.log(f"   ❌ Smart action failed: {action_type}")
+                                    self.log(f"   ❌ Error: {error_msg}")
+                            else:
+                                # Priority ต่ำ - แสดงแต่ไม่ execute
+                                action_type = top_recommendation.get('action_type', 'unknown')
+                                self.log(f"⏭️ Low priority recommendation: {action_type} (P:{priority}) - skipped")
                 
-                # 🆕 6. Enhanced Performance Update
+                # 7. Enhanced Performance Update
                 if self.performance_tracker:
                     performance = self.performance_tracker.get_current_metrics()
                     
-                    # เพิ่ม lot efficiency + portfolio health data
+                    # เพิ่ม lot efficiency data
                     if self.position_monitor:
                         lot_efficiency = self.position_monitor.get_lot_efficiency_report()
                         performance['lot_efficiency'] = lot_efficiency
                     
+                    # 🔧 FIXED: ใช้ basic portfolio health calculation
                     if self.role_manager and positions:
-                        portfolio_health = self.role_manager.get_smart_portfolio_health(positions)
+                        # คำนวณ basic portfolio health แทน get_smart_portfolio_health()
+                        total_pnl = sum(p.get('total_pnl', 0) for p in positions)
+                        profitable_count = len([p for p in positions if p.get('total_pnl', 0) > 0])
+                        profit_ratio = profitable_count / len(positions) if positions else 0
+                        
+                        # Simple health score calculation
+                        basic_health_score = 0.5 + (profit_ratio - 0.5)
+                        basic_health_score = max(0, min(1, basic_health_score))
+                        
+                        if basic_health_score >= 0.7:
+                            health_status = 'good'
+                        elif basic_health_score >= 0.5:
+                            health_status = 'fair' 
+                        else:
+                            health_status = 'poor'
+                        
+                        # สร้าง portfolio health data
+                        portfolio_health = {
+                            'health_score': basic_health_score,
+                            'status': health_status,
+                            'total_pnl': total_pnl,
+                            'profitable_ratio': profit_ratio,
+                            'margin_health': {'margin_level': float('inf'), 'status': 'safe'}
+                        }
+                        
+                        # เพิ่ม margin info ถ้ามี
+                        if self.mt5_connector and self.mt5_connector.is_connected:
+                            account_info = self.mt5_connector.get_account_info()
+                            if account_info:
+                                margin = account_info.get('margin', 0)
+                                equity = account_info.get('equity', 0)
+                                
+                                if margin > 0 and equity > 0:
+                                    margin_level = (equity / margin) * 100
+                                    portfolio_health['margin_health'] = {
+                                        'margin_level': round(margin_level, 1),
+                                        'status': 'good' if margin_level > 200 else 'warning'
+                                    }
+                        
                         performance['portfolio_health'] = portfolio_health
                         
                         # แสดงสุขภาพพอร์ตใน log (ทุก 10 cycles)
@@ -996,51 +964,37 @@ class EnhancedPureCandlestickGUI:
                     
                     self.update_enhanced_performance_display(performance)
                 
-                # 7. Enhanced Risk Management
+                # 8. Enhanced Risk Management Check
                 if self.risk_manager:
                     risk_status = self.risk_manager.check_risk_levels()
-                    if risk_status.get('emergency_stop', False):
-                        self.log("🚨 EMERGENCY STOP triggered by risk manager!")
+                    emergency_stop = risk_status.get('emergency_stop', False)
+                    
+                    # 🔍 DEBUG: แสดงสถานะ risk ทุก 20 cycles
+                    if not hasattr(self, '_risk_log_counter'):
+                        self._risk_log_counter = 0
+                    
+                    self._risk_log_counter += 1
+                    if self._risk_log_counter % 20 == 0:
+                        risk_level = risk_status.get('overall_risk', 'unknown')
+                        risk_score = risk_status.get('risk_score', 0)
+                        can_trade = risk_status.get('can_trade', False)
                         
-                        # ใช้ smart role manager สำหรับ emergency close
-                        if self.role_manager and positions:
-                            # หาออเดอร์กำไรที่ใหญ่ที่สุด
-                            profitable_positions = [p for p in positions if getattr(p, 'profit', 0) > 20]
-                            
-                            if profitable_positions:
-                                # เรียงตามกำไร (มากไปน้อย)
-                                profitable_positions.sort(key=lambda x: getattr(x, 'profit', 0), reverse=True)
-                                top_profitable = profitable_positions[:min(3, len(profitable_positions))]  # เลือก 3 อันดับแรก
-                                
-                                emergency_rec = {
-                                    'action_type': 'emergency_portfolio_protection',
-                                    'positions_to_close': [getattr(p, 'ticket', getattr(p, 'identifier', 'unknown')) for p in top_profitable],
-                                    'emergency_profit': sum(getattr(p, 'profit', 0) for p in top_profitable),
-                                    'priority': 1,
-                                    'reason': 'Risk Manager Emergency Stop - Harvest Top Profits'
-                                }
-                                
-                                result = self.role_manager.execute_smart_recommendation(emergency_rec)
-                                if result.get('success'):
-                                    emergency_profit = emergency_rec['emergency_profit']
-                                    self.log(f"✅ Smart emergency close completed: ${emergency_profit:.2f} profit secured")
-                                else:
-                                    self.log("❌ Smart emergency close failed - using fallback")
-                                    self.emergency_close_all()
-                            else:
-                                self.log("⚠️ No profitable positions for smart emergency close")
-                                self.emergency_close_all()
-                        else:
-                            self.emergency_close_all()
+                        self.log(f"🛡️ Risk Status: {risk_level} ({risk_score:.2f}) | Can trade: {can_trade}")
+                    
+                    if emergency_stop:
+                        self.log("🚨 EMERGENCY STOP triggered by risk manager!")
+                        self.stop_trading()
                         break
                 
                 time.sleep(3)  # ทุก 3 วินาที
                 
             except Exception as e:
                 self.log(f"❌ Enhanced trading loop error: {e}")
+                import traceback
+                self.log(f"❌ Full traceback: {traceback.format_exc()}")
                 time.sleep(5)
         
-        self.log("🔄 Enhanced trading loop with Smart Role Management + Portfolio Intelligence + DEBUG ended")
+        self.log("🔄 Enhanced trading loop ended")
 
     def _evaluate_entry_vs_exit_priority(self, signal_data: Dict, positions: List, 
                                 role_manager, current_price: float = None) -> Dict:
@@ -1251,11 +1205,17 @@ class EnhancedPureCandlestickGUI:
                 )
                 
                 # Update volume balance
-                buy_volume = portfolio_summary.get('total_buy_volume', 0)
-                sell_volume = portfolio_summary.get('total_sell_volume', 0)
+                buy_positions = [p for p in positions if p.get('type', '').upper() == 'BUY']
+                sell_positions = [p for p in positions if p.get('type', '').upper() == 'SELL']
+
+                # คำนวณ total volume
+                buy_volume = sum(p.get('volume', 0) for p in buy_positions)  
+                sell_volume = sum(p.get('volume', 0) for p in sell_positions)
+
                 self.volume_balance_label.config(
                     text=f"BUY: {buy_volume:.2f} | SELL: {sell_volume:.2f}"
                 )
+
                 
                 # Update margin efficiency
                 margin_efficiency = portfolio_summary.get('avg_margin_efficiency', 0)

@@ -513,9 +513,8 @@ class PositionMonitor:
             balance_actions = []
             
             # คำนวณ volume imbalance
-            buy_positions = [p for p in positions if p.get('type') == 'BUY']
-            sell_positions = [p for p in positions if p.get('type') == 'SELL']
-            
+            buy_positions = [p for p in positions if p.get('type', '').upper() == 'BUY']
+            sell_positions = [p for p in positions if p.get('type', '').upper() == 'SELL']            
             total_buy_volume = sum(p.get('volume', 0) for p in buy_positions)
             total_sell_volume = sum(p.get('volume', 0) for p in sell_positions)
             total_volume = total_buy_volume + total_sell_volume

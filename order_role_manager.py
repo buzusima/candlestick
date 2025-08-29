@@ -845,3 +845,248 @@ class SmartOrderRoleManager:
         except Exception as e:
             print(f"❌ Clear old roles error: {e}")
             return []
+        
+    def get_smart_portfolio_health(self, positions: List[Dict]) -> Dict:
+        """
+        🏥 วิเคราะห์สุขภาพ Portfolio แบบ Smart Role-Aware
+        
+        Args:
+            positions: รายการ positions ทั้งหมด
+            
+        Returns:
+            Dict: ข้อมูลสุขภาพ portfolio อย่างละเอียด
+        """
+        try:
+            if not positions:
+                return {
+                    'health_score': 1.0,
+                    'status': 'empty',
+                    'total_positions': 0,
+                    'total_pnl': 0.0,
+                    'role_distribution': {},
+                    'margin_health': {'margin_level': float('inf'), 'status': 'safe'},
+                    'recommendations_count': 0,
+                    'balance_health': {'buy_ratio': 0.5, 'status': 'balanced'},
+                    'risk_factors': []
+                }
+            
+            current_price = self._get_current_price()
+            
+            # 1. วิเคราะห์และจัด roles
+            analysis_result = self.analyze_and_assign_roles(positions)
+            role_assignments = analysis_result.get('assignments', {})
+            recommendations = analysis_result.get('recommendations', [])
+            
+            # 2. คำนวณข้อมูลพื้นฐาน
+            total_positions = len(positions)
+            total_pnl = sum(p.get('total_pnl', 0) for p in positions)
+            
+            # 3. วิเคราะห์การกระจายของ roles
+            role_distribution = {}
+            for role in ['MAIN', 'HG', 'SUPPORT', 'SACRIFICE']:
+                count = sum(1 for r in role_assignments.values() if r == role)
+                role_distribution[role] = {
+                    'count': count,
+                    'percentage': (count / total_positions * 100) if total_positions > 0 else 0
+                }
+            
+            # 4. วิเคราะห์สมดุล BUY/SELL
+            buy_positions = [p for p in positions if p.get('type') == 'buy']
+            sell_positions = [p for p in positions if p.get('type') == 'sell']
+            buy_volume = sum(p.get('volume', 0) for p in buy_positions)
+            sell_volume = sum(p.get('volume', 0) for p in sell_positions)
+            total_volume = buy_volume + sell_volume
+            
+            buy_ratio = buy_volume / total_volume if total_volume > 0 else 0.5
+            
+            balance_status = 'balanced'
+            if buy_ratio > 0.7:
+                balance_status = 'buy_heavy'
+            elif buy_ratio < 0.3:
+                balance_status = 'sell_heavy'
+            
+            balance_health = {
+                'buy_ratio': round(buy_ratio, 3),
+                'sell_ratio': round(1 - buy_ratio, 3),
+                'buy_volume': round(buy_volume, 2),
+                'sell_volume': round(sell_volume, 2),
+                'status': balance_status
+            }
+            
+            # 5. วิเคราะห์ Margin Health
+            margin_health = {'margin_level': float('inf'), 'status': 'safe'}
+            
+            if self.mt5_connector and self.mt5_connector.is_connected:
+                account_info = self.mt5_connector.get_account_info()
+                if account_info:
+                    margin = account_info.get('margin', 0)
+                    equity = account_info.get('equity', 0)
+                    
+                    if margin > 0 and equity > 0:
+                        margin_level = (equity / margin) * 100
+                        margin_health['margin_level'] = round(margin_level, 1)
+                        
+                        if margin_level <= 150:
+                            margin_health['status'] = 'critical'
+                        elif margin_level <= 200:
+                            margin_health['status'] = 'warning'
+                        elif margin_level <= 300:
+                            margin_health['status'] = 'good'
+                        else:
+                            margin_health['status'] = 'excellent'
+            
+            # 6. คำนวณ Health Score (0-1)
+            health_score = self._calculate_portfolio_health_score(
+                positions, role_distribution, balance_health, margin_health, recommendations
+            )
+            
+            # 7. กำหนดสถานะรวม
+            if health_score >= 0.8:
+                overall_status = 'excellent'
+            elif health_score >= 0.6:
+                overall_status = 'good'
+            elif health_score >= 0.4:
+                overall_status = 'fair'
+            elif health_score >= 0.2:
+                overall_status = 'poor'
+            else:
+                overall_status = 'critical'
+            
+            # 8. วิเคราะห์ Risk Factors
+            risk_factors = self._identify_portfolio_risk_factors(
+                positions, role_distribution, balance_health, margin_health
+            )
+            
+            return {
+                'health_score': round(health_score, 3),
+                'status': overall_status,
+                'total_positions': total_positions,
+                'total_pnl': round(total_pnl, 2),
+                'role_distribution': role_distribution,
+                'margin_health': margin_health,
+                'balance_health': balance_health,
+                'recommendations_count': len(recommendations),
+                'top_recommendations': recommendations[:3],  # แสดง 3 อันดับแรก
+                'risk_factors': risk_factors,
+                'analysis_timestamp': datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            print(f"❌ Portfolio health analysis error: {e}")
+            return {
+                'health_score': 0.0,
+                'status': 'error',
+                'error': str(e),
+                'analysis_timestamp': datetime.now().isoformat()
+            }
+    
+    def _calculate_portfolio_health_score(self, positions: List[Dict], role_distribution: Dict, 
+                                         balance_health: Dict, margin_health: Dict, 
+                                         recommendations: List) -> float:
+        """🧮 คำนวณคะแนนสุขภาพ Portfolio"""
+        try:
+            scores = []
+            
+            # 1. P&L Health Score (30% น้ำหนัก)
+            profitable_positions = len([p for p in positions if p.get('total_pnl', 0) > 0])
+            pnl_ratio = profitable_positions / len(positions) if positions else 0
+            
+            pnl_score = 0.5 + (pnl_ratio - 0.5)  # 0.5 = baseline, >0.5 = good
+            pnl_score = max(0, min(1, pnl_score))
+            scores.append(('pnl', pnl_score, 0.3))
+            
+            # 2. Balance Health Score (25% น้ำหนัก)
+            buy_ratio = balance_health.get('buy_ratio', 0.5)
+            imbalance = abs(buy_ratio - 0.5)  # ห่างจาก 50% เท่าไหร่
+            balance_score = max(0, 1 - (imbalance / 0.3))  # imbalance > 30% = score 0
+            scores.append(('balance', balance_score, 0.25))
+            
+            # 3. Role Distribution Health (20% น้ำหนัก)
+            main_count = role_distribution.get('MAIN', {}).get('count', 0)
+            sacrifice_count = role_distribution.get('SACRIFICE', {}).get('count', 0)
+            
+            role_score = 1.0
+            if main_count < 2:  # ต้องมี MAIN อย่างน้อย 2
+                role_score -= 0.3
+            if sacrifice_count > len(positions) * 0.3:  # SACRIFICE เกิน 30%
+                role_score -= 0.4
+            
+            role_score = max(0, role_score)
+            scores.append(('roles', role_score, 0.2))
+            
+            # 4. Margin Health Score (15% น้ำหนัก)
+            margin_level = margin_health.get('margin_level', float('inf'))
+            if margin_level == float('inf'):
+                margin_score = 1.0
+            elif margin_level >= 300:
+                margin_score = 1.0
+            elif margin_level >= 200:
+                margin_score = 0.8
+            elif margin_level >= 150:
+                margin_score = 0.5
+            else:
+                margin_score = 0.1
+            scores.append(('margin', margin_score, 0.15))
+            
+            # 5. Opportunity Health Score (10% น้ำหนัก)
+            opportunity_score = min(1.0, len(recommendations) / 5)  # มี recommendations = healthy
+            scores.append(('opportunities', opportunity_score, 0.1))
+            
+            # คำนวณคะแนนรวม weighted average
+            weighted_sum = sum(score * weight for _, score, weight in scores)
+            total_weight = sum(weight for _, _, weight in scores)
+            
+            final_score = weighted_sum / total_weight if total_weight > 0 else 0
+            
+            return max(0, min(1, final_score))
+            
+        except Exception as e:
+            print(f"❌ Health score calculation error: {e}")
+            return 0.5
+    
+    def _identify_portfolio_risk_factors(self, positions: List[Dict], role_distribution: Dict, 
+                                        balance_health: Dict, margin_health: Dict) -> List[str]:
+        """🚨 ระบุปัจจัยเสี่ยง"""
+        try:
+            risk_factors = []
+            
+            # 1. P&L Risk Factors
+            total_pnl = sum(p.get('total_pnl', 0) for p in positions)
+            heavy_loss_positions = len([p for p in positions if p.get('total_pnl', 0) < -100])
+            
+            if total_pnl < -200:
+                risk_factors.append(f"Large total loss: ${total_pnl:.2f}")
+            if heavy_loss_positions > 3:
+                risk_factors.append(f"Multiple heavy losses: {heavy_loss_positions} positions")
+            
+            # 2. Balance Risk Factors
+            buy_ratio = balance_health.get('buy_ratio', 0.5)
+            if buy_ratio > 0.75:
+                risk_factors.append(f"Heavy BUY bias: {buy_ratio:.1%}")
+            elif buy_ratio < 0.25:
+                risk_factors.append(f"Heavy SELL bias: {(1-buy_ratio):.1%}")
+            
+            # 3. Role Distribution Risks
+            main_count = role_distribution.get('MAIN', {}).get('count', 0)
+            sacrifice_count = role_distribution.get('SACRIFICE', {}).get('count', 0)
+            
+            if main_count < 2:
+                risk_factors.append(f"Too few MAIN positions: {main_count}")
+            if sacrifice_count > len(positions) * 0.3:
+                risk_factors.append(f"Too many SACRIFICE positions: {sacrifice_count}")
+            
+            # 4. Margin Risk Factors
+            margin_level = margin_health.get('margin_level', float('inf'))
+            if margin_level != float('inf') and margin_level < 200:
+                risk_factors.append(f"Low margin level: {margin_level:.1f}%")
+            
+            # 5. Age Risk Factors
+            old_positions = len([p for p in positions if p.get('age_hours', 0) > 24])
+            if old_positions > 5:
+                risk_factors.append(f"Many old positions: {old_positions} > 24h")
+            
+            return risk_factors
+            
+        except Exception as e:
+            print(f"❌ Risk factors identification error: {e}")
+            return [f"Analysis error: {str(e)}"]
